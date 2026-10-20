@@ -518,11 +518,12 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
         "As notas que toques no teclado MIDI fan de escala, en calquera oitava. Sen notas tocadas, usa a escala.",
         "A voz vai á nota exacta que toques no teclado MIDI, na oitava máis próxima. Sen notas tocadas, usa a escala." };
     setupSegment (modeBtn, 3, "modo", modes, modeTips);
-    const char* cals[2] = { "Directo", "Estudio" };
-    const char* calTips[2] = {
-        "Sen latencia (menos de 1 ms): para cantar en directo e gravar escoitándote. Ao transpor moito, a voz soa a esquío.",
-        "Mantén o timbre aínda transpondo unha oitava e deixa mover os formantes. Ten algo de latencia, que o DAW compensa ao reproducir." };
-    setupSegment (calBtn, 2, "calidade", cals, calTips);
+    const char* cals[3] = { "Directo", "Preciso", "Estudio" };
+    const char* calTips[3] = {
+        "Sen latencia (menos de 1 ms): para cantar en directo escoitándote. Afina algo menos exacto cando a voz se move moito. Ao transpor moito, soa a esquío.",
+        "12 ms de latencia: afina o dobre de exacto ca Directo, porque le a voz xa medida. Para gravar ou tocar en directo se non che molesta un pouco de atraso. Ao transpor moito, soa a esquío.",
+        "Mantén o timbre aínda transpondo unha oitava e deixa mover os formantes. Ten máis latencia (15–42 ms segundo a voz), que o DAW compensa ao reproducir." };
+    setupSegment (calBtn, 3, "calidade", cals, calTips);
 
     setupKnob (vel, "velocidade", "Velocidade",
                "Canto tarda en levar a voz á nota dentro de cada nota. 0 ms: ao momento. Para o efecto robot: velocidade e transición a 0 e vibrato a 0 %.");
@@ -617,10 +618,10 @@ void TuneEditor::refresh()
     const int m = (int) proc.params.getRawParameterValue ("modo")->load();
     const int q = (int) proc.params.getRawParameterValue ("calidade")->load();
     for (int i = 0; i < 3; ++i) modeBtn[i].setToggleState (i == m, juce::dontSendNotification);
-    for (int i = 0; i < 2; ++i) calBtn[i].setToggleState (i == q, juce::dontSendNotification);
+    for (int i = 0; i < 3; ++i) calBtn[i].setToggleState (i == q, juce::dontSendNotification);
     link.setToggleState (proc.params.getRawParameterValue ("ligar")->load() > 0.5f, juce::dontSendNotification);
     compare.setToggleState (proc.params.getRawParameterValue ("comparar")->load() > 0.5f, juce::dontSendNotification);
-    if (form.slider.isEnabled() != (q == 1)) { form.slider.setEnabled (q == 1); form.repaint(); }
+    if (form.slider.isEnabled() != (q == 2)) { form.slider.setEnabled (q == 2); form.repaint(); }
     if (preset.getSelectedItemIndex() != proc.getCurrentProgram()) preset.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
 
     if (proc.isKeyListening())
@@ -708,7 +709,7 @@ void TuneEditor::layout()
     // cabeceira: presets, comparar e xeito
     preset.setBounds (240, 24, 210, 34);
     compare.setBounds (460, 24, 120, 34);
-    for (int i = 0; i < 2; ++i) calBtn[i].setBounds (790 + i * 111 - (i > 0 ? 1 : 0), 24, 111 + (i > 0 ? 1 : 0), 34);
+    for (int i = 0; i < 3; ++i) calBtn[i].setBounds (790 + i * 74 - (i > 0 ? 1 : 0), 24, 74 + (i > 0 ? 1 : 0), 34);
 
     display.setBounds (28, 84, 984, 240);
 

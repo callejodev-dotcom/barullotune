@@ -247,6 +247,30 @@ int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 3 && juce::String (argv[1]) == "--file") return processFile (argc, argv);
+    if (argc > 1 && juce::String (argv[1]) == "--cpu")
+    {
+        // tempo real por instancia: voz sintética en bucle, estéreo, bloques de 128
+        std::vector<double> tr;
+        const auto v = makeVoice (tr);
+        for (int q = 0; q < 3; ++q)
+        {
+            TuneProcessor p;
+            p.setPlayConfigDetails (2, 2, SR, 128);
+            setP (p, "calidade", (float) q);
+            p.prepareToPlay (SR, 128);
+            juce::AudioBuffer<float> buf (2, 128);
+            const int blocks = (int) (20.0 * SR / 128);
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            for (int b = 0; b < blocks; ++b)
+            {
+                for (int c = 0; c < 2; ++c) for (int i = 0; i < 128; ++i) buf.setSample (c, i, v[(size_t) ((b * 128 + i) % (int) v.size())]);
+                juce::MidiBuffer m; p.processBlock (buf, m);
+            }
+            const double secs = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+            std::printf ("%s: %.0f veces tempo real (%.2f %% dun núcleo)\n", q == 0 ? "directo" : q == 1 ? "preciso" : "estudio", 20.0 / secs, 100.0 * secs / 20.0);
+        }
+        return 0;
+    }
     if (argc > 2 && juce::String (argv[1]) == "--snapshot") { snapshot (juce::File { juce::String (argv[2]) }); return 0; }
 
     std::vector<double> truth;
@@ -256,9 +280,10 @@ int main (int argc, char** argv)
     auto major = [] (TuneProcessor& p) { setP (p, "escala", 1); setP (p, "tonica", 0); };
 
     juce::AudioBuffer<float> robot, nat, tr;
-    for (int q = 0; q < 2; ++q)
+    for (int qi = 0; qi < 3; ++qi)
     {
-        const char* qn = q == 0 ? "directo" : "estudio";
+        const int q = qi == 0 ? 0 : (qi == 1 ? 2 : 1);   // directo, estudio, preciso
+        const char* qn = q == 0 ? "directo" : q == 1 ? "preciso" : "estudio";
         auto setq = [q] (TuneProcessor& p) { setP (p, "calidade", (float) q); };
         std::printf ("---- %s\n", qn);
 
@@ -267,9 +292,10 @@ int main (int argc, char** argv)
         auto s = evaluate (rb, lat, truth, 0);
         std::printf ("robot:   entrada %.1f c -> saída %.1f c (máx %.1f c), %d tramas, %d fóra de nota | latencia %d mostras (%.2f ms)\n",
                      s.inC, s.outC, s.maxC, s.frames, s.wrong, lat, 1000.0 * lat / SR);
-        check (q == 0 ? "directo robot: menos de 8 cents de media" : "estudio robot: menos de 3 cents de media",
+        check (q == 0 ? "directo robot: menos de 8 cents de media" : q == 1 ? "preciso robot: menos de 3 cents de media" : "estudio robot: menos de 3 cents de media",
                s.outC < (q == 0 ? 8.0 : 3.0) && s.wrong < s.frames / 30 + 2);
         if (q == 0) check ("directo: latencia de menos de 1 ms", lat < SR * 0.001);
+        if (q == 1) check ("preciso: latencia de menos de 13 ms", lat < SR * 0.013);
 
         // natural
         auto nt = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 60); setP (p, "transicion", 120); }, lat);
@@ -345,10 +371,11 @@ int main (int argc, char** argv)
             check ("cantidade 0: mesmo nivel (±1 dB)", std::abs (db) < 1.0);
         }
         if (q == 0) { robot = rb; nat = nt; tr = t5; }
+        std::printf ("---- (fin %s)\n", qn);
     }
 
     // estéreo de verdade: L = voz, R = 0,6 · voz atrasada 3 ms -> as dúas canles corríxense igual
-    for (int q = 0; q < 2; ++q)
+    for (int q = 0; q < 3; q += 2)
     {
         TuneProcessor p;
         p.setPlayConfigDetails (2, 2, SR, 512);
@@ -388,11 +415,23 @@ int main (int argc, char** argv)
         check ("comparar = voz orixinal aliñada", d < 1.0e-6f);
     }
 
+    // voz moi baixa (−40 dB): ten que afinala igual (antes o detector tomábaa por silencio)
+    {
+        std::vector<float> quiet (voice);
+        for (auto& v : quiet) v *= 0.01f;
+        int l = 0;
+        auto y = run (quiet, 512, 2, [&] (TuneProcessor& p) { major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, l);
+        y.applyGain (100.0f);
+        auto sq = evaluate (y, l, truth, 0);
+        std::printf ("voz a -40 dB: saída %.1f c, %d tramas\n", sq.outC, sq.frames);
+        check ("voz baixa (-40 dB): afínaa igual", sq.frames > 400 && sq.outC < 8.0);
+    }
+
     // formantes (estudio): a nota non cambia e o timbre si
     {
         int l1 = 0, l2 = 0;
-        auto base = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, l1);
-        auto up = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "formantes", 4); }, l2);
+        auto base = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 2); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, l1);
+        auto up = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 2); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "formantes", 4); }, l2);
         auto s = evaluate (up, l2, truth, 0);
         auto centroid = [] (const juce::AudioBuffer<float>& b)
         {
@@ -409,8 +448,8 @@ int main (int argc, char** argv)
     // rango: menos latencia en estudio con voz aguda
     {
         int lg = 0, la = 0;
-        run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); setP (p, "rango", 0); }, lg);
-        run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); setP (p, "rango", 5); }, la);
+        run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 2); setP (p, "rango", 0); }, lg);
+        run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 2); setP (p, "rango", 5); }, la);
         std::printf ("estudio: latencia baixo %.1f ms, soprano %.1f ms\n", 1000.0 * lg / SR, 1000.0 * la / SR);
         check ("rango agudo: menos latencia", la < lg / 2);
     }
@@ -424,7 +463,7 @@ int main (int argc, char** argv)
         bool finite = true;
         for (int blk = 0; blk < 200; ++blk)
         {
-            if (blk == 60) setP (p, "calidade", 1);
+            if (blk == 60) setP (p, "calidade", 2);
             if (blk == 120) setP (p, "rango", 2);
             if (blk == 160) setP (p, "calidade", 0);
             for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) ((blk * 512 + i) % (int) voice.size())]);
@@ -489,7 +528,7 @@ int main (int argc, char** argv)
     }
 
     // silencio e ruído: nada raro (nos dous xeitos)
-    for (int q = 0; q < 2; ++q)
+    for (int q = 0; q < 3; ++q)
     {
         std::vector<float> noise (48000 * 2);
         std::mt19937 rng (3); std::uniform_real_distribution<float> u (-0.5f, 0.5f);
@@ -497,7 +536,7 @@ int main (int argc, char** argv)
         auto y = run (noise, 512, 2, [q] (TuneProcessor& p) { setP (p, "calidade", (float) q); setP (p, "transpor", 7); }, lat);
         float mx = 0; bool finite = true;
         for (int i = 0; i < y.getNumSamples(); ++i) { const float v = y.getSample (0, i); finite &= std::isfinite (v); mx = std::max (mx, std::abs (v)); }
-        check (q == 0 ? "directo: silencio e ruído sen valores raros" : "estudio: silencio e ruído sen valores raros", finite && mx < 2.0f);
+        check (q == 0 ? "directo: silencio e ruído sen valores raros" : q == 1 ? "preciso: silencio e ruído sen valores raros" : "estudio: silencio e ruído sen valores raros", finite && mx < 2.0f);
     }
 
     if (argc > 1)

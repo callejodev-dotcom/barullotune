@@ -125,7 +125,7 @@ private:
     juce::ComboBox preset, tonica, escala, voz;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt, vozAtt;
     juce::TextButton detect, link, compare;
-    juce::TextButton modeBtn[3], calBtn[2];
+    juce::TextButton modeBtn[3], calBtn[3];
 
     ui::Knob vel, transi, tol, tolT, vib, cant, form, trans, la, mest, vol;
     float lastVel = -1, lastTransi = -1;

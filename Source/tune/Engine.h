@@ -91,7 +91,7 @@ public:
     double period = 0;   // en mostras da frecuencia orixinal
     bool voiced = false;
     double clarity = 0;  // 1 - mínimo da diferenza normalizada
-    double threshold = 0.2, gate = 1.0e-4;
+    double threshold = 0.2, gate = 1.0e-9;   // ~ −90 dBFS: a voz decídea a periodicidade, non o nivel (antes −40 dBFS deixaba sen afinar as voces baixas)
 
 private:
     void analyse()
@@ -181,7 +181,7 @@ class Engine
 {
 public:
     enum Mode { ScaleMode = 0, MidiScale = 1, MidiNote = 2 };
-    enum Quality { Direct = 0, Studio = 1 };
+    enum Quality { Direct = 0, Precise = 1, Studio = 2 };
     // tipos de voz: rango do detector (e latencia en estudio)
     enum Range { Bass = 0, Baritone, Tenor, Alto, Mezzo, Soprano, General, numRanges };
 
@@ -220,13 +220,15 @@ public:
     // cambia o xeito e o rango (cambia a latencia; volve empezar)
     void configure (int q, int r)
     {
-        quality = q == Studio ? Studio : Direct;
+        quality = std::max (0, std::min (2, q));
         range = std::max (0, std::min ((int) numRanges - 1, r));
         double lo, hi;
         rangeHz (range, lo, hi);
         detector.setRange (lo, hi);
         pMax = (int) std::ceil (sr / lo) + 2;
-        latencySamples = quality == Studio ? (int) std::ceil (2.5 * pMax) + 32 : dMin;
+        // preciso: a lectura vai 11,5 ms detrás, dentro de ciclos xa medidos (sen extrapolar)
+        dLead = quality == Precise ? dMin + (int) std::lround (0.0115 * sr) : dMin;
+        latencySamples = quality == Studio ? (int) std::ceil (2.5 * pMax) + 32 : dLead;
         reset();
     }
 
@@ -253,7 +255,7 @@ public:
         nMarks = 0; firstMark = 0; lastMark = 0; lastMarkVoiced = false;
         nextSyn = (double) pMax; srcOff = -(double) latencySamples; synVoiced = false; studioState = {};
         // directo
-        rp = -(double) dMin; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; cycleOk = false; directState = {};
+        rp = -(double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; cycleOk = false; directState = {};
         // común
         target = -1; mSmooth = 0;
         voiced = false; detectedHz = 0; correctionCents = 0; inputMidi = 0; outputMidi = 0;
@@ -500,8 +502,13 @@ private:
         // corrección mostra a mostra (co ton detectado agora mesmo)
         double raw = transpose;
         double mNow = inputMidi;
-        if (voiced && cycleOk)
-            mNow = cycleM + cycleSlope * clampd (rp - cycleT, 0.0, 4.0 * curP);   // o ton xusto onde se está lendo
+        if (voiced)
+        {
+            double mi = 0;
+            if (pitchAtFromMarks (rp, mi)) mNow = mi;                 // xa medido: o ton dos ciclos onde se le
+            else if (cycleOk)
+                mNow = cycleM + cycleSlope * clampd (rp - cycleT, 0.0, 4.0 * curP);   // aínda non: extrapólase
+        }
         const bool starting = voiced && target >= 0 && ! directState.active;
         if (voiced && target >= 0) { double om; raw = correctionStep (directState, mNow, target, 1.0, om); }
         else directState.active = false;
@@ -530,16 +537,16 @@ private:
             // o salto escóllese comparando medio ciclo (o fundido é curto: así non mestura dous ciclos distintos)
             const int cmp = (int) clampd (P * 0.5, (double) xfade, 2048.0);
             xfLen = xfade;
-            if (rho > 1.0 && D < (double) dMin)
+            if (rho > 1.0 && D < (double) dLead)
             {
                 // a lectura alcanza a escritura (ton para arriba): volve atrás un ciclo
                 const double j = voiced ? bestJump (rp, P, P * 0.12, -1.0, (double) (ringSize / 2), std::min (cmp, (int) D - 2)) : P;
                 rp2 = rp - j; xfPos = 0;
             }
-            else if (rho <= 1.0 && D >= (double) dMin + 1.25 * P)
+            else if (rho <= 1.0 && D >= (double) dLead + 1.25 * P)
             {
                 // a lectura quedou atrás (ton para abaixo): salta un ciclo adiante, así o atraso nunca medra
-                const double maxJ = D - (double) dMin - 2.0;
+                const double maxJ = D - (double) dLead - 2.0;
                 const double j = voiced ? bestJump (rp, P, P * 0.12, +1.0, maxJ, std::min (cmp, (int) (D - maxJ) - 2)) : std::min (P, maxJ);
                 rp2 = rp + j; xfPos = 0;
             }
@@ -622,6 +629,34 @@ private:
     }
 
     const Mark& markAt (int k) const { return marks[(size_t) ((firstMark + k) % maxMarks)]; }
+
+    // ton na posición p a partir dos ciclos xa marcados: interpola entre os centros dos
+    // ciclos veciños. Devolve false se p aínda non está entre dúas marcas con voz.
+    bool pitchAtFromMarks (double p, double& m) const
+    {
+        int k = nMarks - 1;
+        while (k >= 1 && markAt (k).pos > p) --k;   // markAt(k).pos <= p
+        if (k < 1 || k + 1 >= nMarks) return false;
+        auto periodOf = [this] (int i) -> double     // intervalo entre a marca i e a i+1
+        {
+            if (i < 0 || i + 1 >= nMarks) return 0;
+            const Mark& a = markAt (i); const Mark& b = markAt (i + 1);
+            if (! a.voiced || ! b.voiced) return 0;
+            const double per = b.pos - a.pos;
+            return (per < curP * 0.8 || per > curP * 1.25) ? 0.0 : per;
+        };
+        const double pk = periodOf (k);
+        if (pk <= 0) return false;
+        auto toMidi = [this] (double per) { return 69.0 + 12.0 * std::log2 (sr / per / refA); };
+        const double ck = markAt (k).pos + 0.5 * pk;
+        const int nb = p < ck ? k - 1 : k + 1;          // intervalo veciño cara a onde está p
+        const double pn = periodOf (nb);
+        if (pn <= 0) { m = toMidi (pk); return true; }
+        const double cn = markAt (nb).pos + 0.5 * pn;
+        const double t = clampd ((p - ck) / (cn - ck), 0.0, 1.0);
+        m = toMidi (pk) + (toMidi (pn) - toMidi (pk)) * t;
+        return true;
+    }
 
     // ton dos dous últimos ciclos medidos e a súa tendencia (para o xeito directo, que
     // le a voz case ao momento e non pode esperar polo detector)
@@ -760,7 +795,7 @@ private:
     PitchDetector detector;
     int quality = Direct, range = General;
     int pMax = 640, pMaxAlloc = 800, latencySamples = 64, ringSize = 8192;
-    int xfade = 36, dMin = 44;
+    int xfade = 36, dMin = 44, dLead = 44;
     double unvoicedP = 240;
     std::vector<float> in, sinc;          // in: o centro (para detectar e marcar)
     std::vector<float> inCh[2];           // cada canle

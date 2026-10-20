@@ -46,7 +46,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, U ("Volume"), NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; })));
     // cambian a latencia: non se automatizan
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "calidade", 1 }, U ("Xeito"), StringArray { U ("Directo"), U ("Estudio") }, 0,
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "calidade", 1 }, U ("Xeito"), StringArray { U ("Directo"), U ("Preciso"), U ("Estudio") }, 0,
         AudioParameterChoiceAttributes().withAutomatable (false)));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "rango", 1 }, U ("Voz"),
         StringArray { U ("Baixo"), U ("Barítono"), U ("Tenor"), U ("Alto"), U ("Mezzo"), U ("Soprano"), U ("Calquera") }, 6,
@@ -92,7 +92,7 @@ TuneProcessor::TuneProcessor()
 // xeito e rango cambian a latencia: o motor volve empezar e avísase ao DAW
 void TuneProcessor::applyEngineSettings()
 {
-    const int q = juce::jlimit (0, 1, (int) pCal->load()), r = juce::jlimit (0, (int) tune::Engine::numRanges - 1, (int) pRango->load());
+    const int q = juce::jlimit (0, 2, (int) pCal->load()), r = juce::jlimit (0, (int) tune::Engine::numRanges - 1, (int) pRango->load());
     if (q != engine.currentQuality() || r != engine.currentRange() || latencyNow.load() != engine.latency())
     {
         engine.configure (q, r);
@@ -179,8 +179,8 @@ const std::vector<TuneProcessor::Preset>& TuneProcessor::presets()
         { "Robot",          "O efecto clásico: salta de nota en seco e sen vibrato.",                       0,   0,   0,  0,   0, 100,  0,   0, -1 },
         { "Trap",           "Duro, pero cun pouco de vida nas notas longas.",                               0,  12,  25,  0,   0, 100,  0,   0, -1 },
         { "Directo seguro", "Para cantar en directo sen latencia: corrección discreta.",                   25,  50, 100,  6,  30,  90,  0,   0,  0 },
-        { "Xigante",        "Unha oitava abaixo e voz grande (Estudio).",                                  20,  40, 100,  0,   0, 100, -4, -12,  1 },
-        { "Trasno",         "Unha oitava arriba e voz pequena (Estudio).",                                 20,  40, 100,  0,   0, 100,  4,  12,  1 },
+        { "Xigante",        "Unha oitava abaixo e voz grande (en Estudio).",                                  20,  40, 100,  0,   0, 100, -4, -12,  2 },
+        { "Trasno",         "Unha oitava arriba e voz pequena (Estudio).",                                 20,  40, 100,  0,   0, 100,  4,  12,  2 },
     };
     return p;
 }

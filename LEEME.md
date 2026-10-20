@@ -56,7 +56,12 @@ git tag v0.1.0 && git push origin v0.1.0
 
 A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 
-## Créditos e licenzas
+## Créditos
 
 - Detector de ton baseado en YIN (de Cheveigné e Kawahara, 2002). Desprazamento por TD-PSOLA (Moulines e Charpentier, 1990). Código propio.
-- Tipografía Barlow (licenza OFL, `Resources/Barlow-OFL.txt`).
+
+## Licencia
+
+Barullo Tune es software libre: se publica bajo la licencia **GNU Affero General Public License v3.0** (archivo `LICENSE`). Puedes usarlo, estudiarlo, modificarlo y compartirlo; si distribuyes una versión modificada, tiene que ir con su código y bajo la misma licencia.
+
+Usa JUCE 8 bajo su licencia AGPLv3. La tipografía Barlow va con su licencia OFL (`Resources/Barlow-OFL.txt`).

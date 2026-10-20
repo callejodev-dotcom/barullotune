@@ -252,11 +252,12 @@ int main (int argc, char** argv)
         // tempo real por instancia: voz sintética en bucle, estéreo, bloques de 128
         std::vector<double> tr;
         const auto v = makeVoice (tr);
-        for (int q = 0; q < 3; ++q)
+        for (int q = 0; q < 4; ++q)
         {
             TuneProcessor p;
             p.setPlayConfigDetails (2, 2, SR, 128);
-            setP (p, "calidade", (float) q);
+            setP (p, "calidade", (float) (q == 3 ? 0 : q));
+            if (q == 3) setP (p, "transpor", 5);   // directo transpondo: coa corrección de formantes
             p.prepareToPlay (SR, 128);
             juce::AudioBuffer<float> buf (2, 128);
             const int blocks = (int) (20.0 * SR / 128);
@@ -267,7 +268,7 @@ int main (int argc, char** argv)
                 juce::MidiBuffer m; p.processBlock (buf, m);
             }
             const double secs = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
-            std::printf ("%s: %.0f veces tempo real (%.2f %% dun núcleo)\n", q == 0 ? "directo" : q == 1 ? "preciso" : "estudio", 20.0 / secs, 100.0 * secs / 20.0);
+            std::printf ("%s: %.0f veces tempo real (%.2f %% dun núcleo)\n", q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : "directo +5 (formantes)", 20.0 / secs, 100.0 * secs / 20.0);
         }
         return 0;
     }
@@ -443,6 +444,50 @@ int main (int argc, char** argv)
         const double c0 = centroid (base), c1 = centroid (up);
         std::printf ("formantes +4: saída %.1f c, brillo %.0f Hz -> %.0f Hz\n", s.outC, c0, c1);
         check ("formantes +4: mesma nota e timbre máis brillante", s.outC < 4.0 && c1 > c0 * 1.12);
+    }
+
+    // directo transpondo +5: a nota sobe pero o timbre non (sen voz de esquío).
+    // Espectro medio en terzos de oitava (200 Hz–6 kHz), comparado co da voz orixinal.
+    {
+        auto bands = [] (const float* x, int len)
+        {
+            std::vector<double> e;
+            for (double fc = 200.0; fc <= 6000.0; fc *= std::pow (2.0, 1.0 / 3.0))
+            {
+                const double w = 2.0 * juce::MathConstants<double>::pi * fc / SR, q = 4.3, al = std::sin (w) / (2.0 * q), a0 = 1.0 + al;
+                const double b0 = al / a0, b2 = -al / a0, a1 = -2.0 * std::cos (w) / a0, a2 = (1.0 - al) / a0;
+                double z1 = 0, z2 = 0, acc = 0;
+                for (int i = 0; i < len; ++i)
+                {
+                    const double y = b0 * x[i] + z1; z1 = -a1 * y + z2; z2 = b2 * x[i] - a2 * y; acc += y * y;
+                }
+                e.push_back (10.0 * std::log10 (acc + 1e-20));
+            }
+            double m = 0; for (double v : e) m += v; m /= (double) e.size();
+            for (double& v : e) v -= m;
+            return e;
+        };
+        auto dist = [] (const std::vector<double>& a, const std::vector<double>& b)
+        {
+            double d = 0; for (size_t i = 0; i < a.size(); ++i) d += (a[i] - b[i]) * (a[i] - b[i]);
+            return std::sqrt (d / (double) a.size());
+        };
+        const double r = std::pow (2.0, 5.0 / 12.0);
+        std::vector<float> chip ((size_t) (voice.size() / r));
+        for (size_t i = 0; i < chip.size(); ++i)
+        {
+            const double p = (double) i * r; const size_t i0 = (size_t) p; const float f = (float) (p - (double) i0);
+            chip[i] = voice[i0] + (voice[std::min (voice.size() - 1, i0 + 1)] - voice[i0]) * f;
+        }
+        int l = 0;
+        auto d5 = run (voice, 512, 2, [&] (TuneProcessor& p) { major (p); setP (p, "transpor", 5); }, l);
+        auto s5 = run (voice, 512, 2, [&] (TuneProcessor& p) { major (p); setP (p, "transpor", 5); setP (p, "calidade", 2); }, l);
+        const auto eo = bands (voice.data(), (int) voice.size());
+        const double dc = dist (eo, bands (chip.data(), (int) chip.size()));
+        const double dd = dist (eo, bands (d5.getReadPointer (0), d5.getNumSamples()));
+        const double ds = dist (eo, bands (s5.getReadPointer (0), s5.getNumSamples()));
+        std::printf ("timbre ao transpor +5 (distancia ao orixinal): esquío %.1f dB, directo %.1f dB, estudio %.1f dB\n", dc, dd, ds);
+        check ("directo +5: sen voz de esquío", dd < 0.65 * dc && dd < ds + 1.0);
     }
 
     // rango: menos latencia en estudio con voz aguda

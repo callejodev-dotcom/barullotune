@@ -520,9 +520,9 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     setupSegment (modeBtn, 3, "modo", modes, modeTips);
     const char* cals[3] = { "Directo", "Preciso", "Estudio" };
     const char* calTips[3] = {
-        "Sen latencia (menos de 1 ms): para cantar en directo escoitándote. Afina algo menos exacto cando a voz se move moito. Ao transpor moito, soa a esquío.",
-        "12 ms de latencia: afina o dobre de exacto ca Directo, porque le a voz xa medida. Para gravar ou tocar en directo se non che molesta un pouco de atraso. Ao transpor moito, soa a esquío.",
-        "Mantén o timbre aínda transpondo unha oitava e deixa mover os formantes. Ten máis latencia (15–42 ms segundo a voz), que o DAW compensa ao reproducir." };
+        "Sen latencia (menos de 1 ms): para cantar en directo escoitándote. Afina algo menos exacto cando a voz se move moito.",
+        "12 ms de latencia: afina o dobre de exacto ca Directo, porque le a voz xa medida. Para gravar ou tocar en directo se non che molesta un pouco de atraso.",
+        "O máis exacto e o mellor son ao transpor moito (copia ciclos enteiros da voz). Ten máis latencia (15–42 ms segundo a voz), que o DAW compensa ao reproducir." };
     setupSegment (calBtn, 3, "calidade", cals, calTips);
 
     setupKnob (vel, "velocidade", "Velocidade",
@@ -535,8 +535,8 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
                "As desafinacións máis curtas ca isto tampouco se tocan (adornos, ataques). Desactivada á esquerda do todo.");
     setupKnob (vib, "vibrato", "Vibrato", "Canto vibrato da túa voz pasa á saída: 0 % o aplana, 100 % déixao igual, 200 % dóbrao.");
     setupKnob (cant, "cantidade", "Cantidade", "Canto se corrixe: 100 % leva a voz xusto á nota; 50 % deixa a metade da desafinación.");
-    setupKnob (form, "formantes", "Formantes", "Move o timbre sen cambiar a nota: para arriba, voz máis pequena e brillante; para abaixo, máis grande e escura. Só en Estudio.");
-    setupKnob (trans, "transpor", "Transpor", "Sobe ou baixa a voz en semitonos. En Estudio mantén o timbre; en Directo soa a esquío.");
+    setupKnob (form, "formantes", "Formantes", "Move o timbre sen cambiar a nota: para arriba, voz máis pequena e brillante; para abaixo, máis grande e escura.");
+    setupKnob (trans, "transpor", "Transpor", "Sobe ou baixa a voz en semitonos mantendo o timbre (sen voz de esquío), en calquera xeito.");
     setupKnob (la, "la", "La", "Afinación de referencia do La4.");
     la.slider.getProperties().set ("centre", 440.0);
     setupKnob (mest, "mestura", "Mestura", "Canto de voz afinada. Por baixo de 100 % mestúrase coa orixinal, aliñada no tempo.");
@@ -621,7 +621,6 @@ void TuneEditor::refresh()
     for (int i = 0; i < 3; ++i) calBtn[i].setToggleState (i == q, juce::dontSendNotification);
     link.setToggleState (proc.params.getRawParameterValue ("ligar")->load() > 0.5f, juce::dontSendNotification);
     compare.setToggleState (proc.params.getRawParameterValue ("comparar")->load() > 0.5f, juce::dontSendNotification);
-    if (form.slider.isEnabled() != (q == 2)) { form.slider.setEnabled (q == 2); form.repaint(); }
     if (preset.getSelectedItemIndex() != proc.getCurrentProgram()) preset.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
 
     if (proc.isKeyListening())

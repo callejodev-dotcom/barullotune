@@ -470,16 +470,30 @@ namespace lay
     // grupos de potenciómetros (x inicial, ancho) e a súa etiqueta
     constexpr int knobW = 80, linkW = 46, gap = 18, rowY = 344;
     constexpr int g1 = 28, g2 = g1 + knobW * 2 + linkW + gap, g3 = g2 + knobW * 2 + gap, g4 = g3 + knobW * 3 + gap;
+    constexpr int rowB = 494;   // fila do modo, a tonalidade e a voz, enriba do teclado
 }
 
 TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
 {
     using namespace ui;
     setLookAndFeel (&look);
-    addAndMakeVisible (display);
-    addAndMakeVisible (keyboard);
+    addAndMakeVisible (canvas);
+    canvas.painter = [this] (juce::Graphics& g) { paintCanvas (g); };
+    canvas.addAndMakeVisible (display);
+    canvas.addAndMakeVisible (keyboard);
     display.setTooltip (U ("Á esquerda, a nota á que vai a voz: a agulla laranxa é a túa voz e a branca a afinada (en cents). "
                            "Á dereita, o ton nos últimos segundos."));
+
+    for (int i = 0; i < proc.getNumPrograms(); ++i) preset.addItem (proc.getProgramName (i), i + 1);
+    preset.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
+    preset.onChange = [this] { const int i = preset.getSelectedItemIndex(); if (i >= 0) { proc.setCurrentProgram (i); refresh(); } };
+    preset.setTooltip (U ("Presets: só cambian o carácter da corrección (velocidade, transición, vibrato, tolerancia…), non a tonalidade nin a voz."));
+    canvas.addAndMakeVisible (preset);
+
+    compare.setButtonText ("Comparar");
+    compare.setTooltip (U ("Mentres está aceso, escoitas a voz sen afinar (aliñada no tempo) para comparar."));
+    compare.onClick = [this] { proc.setParamPlain ("comparar", proc.params.getRawParameterValue ("comparar")->load() > 0.5f ? 0.0f : 1.0f); refresh(); };
+    canvas.addAndMakeVisible (compare);
 
     for (int i = 0; i < 12; ++i) tonica.addItem (scales::noteName (i), i + 1);
     for (int i = 0; i < (int) scales::all().size(); ++i) escala.addItem (U (scales::all()[(size_t) i].name), i + 1);
@@ -491,12 +505,12 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     tonica.setTooltip (U ("Tónica da escala."));
     escala.setTooltip (U ("Escala. Cromática corrixe a calquera semitono; «Personalizada» son as notas que acendas no teclado."));
     voz.setTooltip (U ("Tipo de voz: o afinador só busca notas no seu rango (máis rápido e sen saltos de oitava). No teclado, o que queda fóra vese máis escuro."));
-    for (auto* c : { &tonica, &escala, &voz }) addAndMakeVisible (c);
+    for (auto* c : { &tonica, &escala, &voz }) canvas.addAndMakeVisible (c);
 
     detect.setButtonText ("Detectar");
     detect.setTooltip (U ("Canta uns segundos: Barullo Tune escoita a melodía e escolle a tónica e a escala. Volve pulsar para cancelar."));
     detect.onClick = [this] { if (proc.isKeyListening()) proc.stopKeyListening(); else proc.startKeyListening(); refresh(); };
-    addAndMakeVisible (detect);
+    canvas.addAndMakeVisible (detect);
 
     const char* modes[3] = { "Escala", "MIDI escala", "MIDI nota" };
     const char* modeTips[3] = {
@@ -531,7 +545,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     link.getProperties().set ("fontSize", 13.0f);
     link.setTooltip (U ("Liga velocidade e transición: ao mover unha, a outra móvese na mesma proporción."));
     link.onClick = [this] { proc.setParamPlain ("ligar", proc.params.getRawParameterValue ("ligar")->load() > 0.5f ? 0.0f : 1.0f); refresh(); };
-    addAndMakeVisible (link);
+    canvas.addAndMakeVisible (link);
     vel.slider.onValueChange = [this]
     {
         const float v = (float) vel.slider.getValue();
@@ -556,7 +570,12 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     };
     lastVel = (float) vel.slider.getValue(); lastTransi = (float) transi.slider.getValue();
 
-    setSize (1040, 664);
+    layout();
+    const float sc = juce::jlimit (0.75f, 1.5f, proc.uiScale.load());   // antes de nada: resized() vaino sobrescribir
+    setSize (juce::roundToInt (W * sc), juce::roundToInt (H * sc));
+    setResizable (true, true);
+    setResizeLimits (W * 3 / 4, H * 3 / 4, W * 3 / 2, H * 3 / 2);
+    if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) W / (double) H);
     refresh();
     startTimerHz (30);
 }
@@ -573,7 +592,7 @@ void TuneEditor::setupKnob (ui::Knob& k, const char* id, const char* name, const
     k.att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.params, id, k.slider);
     if (auto* prm = proc.params.getParameter (id)) k.slider.setDoubleClickReturnValue (true, prm->convertFrom0to1 (prm->getDefaultValue()));
     k.slider.setTooltip (U (tip));
-    addAndMakeVisible (k);
+    canvas.addAndMakeVisible (k);
 }
 
 void TuneEditor::setupSegment (juce::TextButton* b, int count, const char* paramId, const char* const* names, const char* const* tips)
@@ -589,7 +608,7 @@ void TuneEditor::setupSegment (juce::TextButton* b, int count, const char* param
         if (i < count - 1) edges |= juce::Button::ConnectedOnRight;
         b[i].setConnectedEdges (edges);
         b[i].onClick = [this, id, i] { proc.setParamPlain (id, (float) i); refresh(); };
-        addAndMakeVisible (b[i]);
+        canvas.addAndMakeVisible (b[i]);
     }
 }
 
@@ -600,7 +619,9 @@ void TuneEditor::refresh()
     for (int i = 0; i < 3; ++i) modeBtn[i].setToggleState (i == m, juce::dontSendNotification);
     for (int i = 0; i < 2; ++i) calBtn[i].setToggleState (i == q, juce::dontSendNotification);
     link.setToggleState (proc.params.getRawParameterValue ("ligar")->load() > 0.5f, juce::dontSendNotification);
+    compare.setToggleState (proc.params.getRawParameterValue ("comparar")->load() > 0.5f, juce::dontSendNotification);
     if (form.slider.isEnabled() != (q == 1)) { form.slider.setEnabled (q == 1); form.repaint(); }
+    if (preset.getSelectedItemIndex() != proc.getCurrentProgram()) preset.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
 
     if (proc.isKeyListening())
     {
@@ -621,17 +642,19 @@ void TuneEditor::timerCallback()
     display.update();
     keyboard.repaint();
     refresh();
-    repaint (790, 60, 222, 18);   // latencia
+    canvas.repaint (790, 60, 222, 18);   // latencia
 }
 
-void TuneEditor::paint (juce::Graphics& g)
+void TuneEditor::paint (juce::Graphics& g) { g.fillAll (ui::col::noite); }
+
+void TuneEditor::paintCanvas (juce::Graphics& g)
 {
     using namespace ui;
     g.fillAll (col::noite);
 
     g.setFont (cond (34.0f));
     g.setColour (col::escuma);
-    g.drawText ("Barullo Tune", juce::Rectangle<float> (28.0f, 20.0f, 220.0f, 42.0f), juce::Justification::centredLeft, false);
+    g.drawText ("Barullo Tune", juce::Rectangle<float> (28.0f, 20.0f, 200.0f, 42.0f), juce::Justification::centredLeft, false);
 
     auto small = [&] (const juce::String& t, juce::Rectangle<int> r, juce::Justification j = juce::Justification::centredLeft)
     {
@@ -640,35 +663,32 @@ void TuneEditor::paint (juce::Graphics& g)
     const float lat = proc.latencyMs();
     small (U ("latencia ") + (lat < 1.0f ? U ("menos de 1 ms") : num (lat, 0) + " ms"), { 790, 60, 222, 18 }, juce::Justification::centred);
 
-    // grupos de potenciómetros, coa súa etiqueta e unha liña entre eles
+    // grupos de potenciómetros, coa súa etiqueta e unha liña a cada lado
     using namespace lay;
-    auto group = [&] (int x, int w, const char* t)
+    auto group = [&] (int x, int w, const juce::String& t)
     {
-        g.setFont (semi (14.0f)); g.setColour (col::neboa);
-        g.drawText (U (t), juce::Rectangle<int> (x, rowY - 2, w, 18), juce::Justification::centred, false);
+        const auto f = semi (14.0f);
+        g.setFont (f); g.setColour (col::neboa);
+        g.drawText (t, juce::Rectangle<int> (x, rowY - 2, w, 18), juce::Justification::centred, false);
+        const int tw = (int) juce::GlyphArrangement::getStringWidth (f, t);
         g.setColour (col::lina);
-        g.fillRect (x + 8, rowY + 8, (w - 16 - (int) juce::GlyphArrangement::getStringWidth (semi (14.0f), U (t))) / 2 - 8, 1);
-        const int tw = (int) juce::GlyphArrangement::getStringWidth (semi (14.0f), U (t));
-        g.fillRect (x + w / 2 + tw / 2 + 8, rowY + 8, (w - 16 - tw) / 2 - 8, 1);
+        g.fillRect (x + 8, rowY + 8, (w - tw) / 2 - 16, 1);
+        g.fillRect (x + w / 2 + tw / 2 + 8, rowY + 8, (w - tw) / 2 - 16, 1);
     };
     group (g1, knobW * 2 + linkW, "Afinar");
     group (g2, knobW * 2, "Tolerancia");
     group (g3, knobW * 3, "Voz");
-    group (g4, knobW * 4, U ("Saída").toRawUTF8());
+    group (g4, knobW * 4, U ("Saída"));
 
-    // teclado: lenda
-    const int ly = 504;
-    auto swatch = [&] (int x, juce::Colour c, const char* t, bool hatch)
+    // lenda do teclado
+    auto swatch = [&] (int x, juce::Colour c, const juce::String& t)
     {
-        auto r = juce::Rectangle<float> ((float) x, (float) ly + 3.0f, 18.0f, 10.0f);
-        g.setColour (c); g.fillRoundedRectangle (r, 2.0f);
-        if (hatch) { g.setColour (col::noite.withAlpha (0.35f)); for (float xx = r.getX() - 6; xx < r.getRight(); xx += 5) g.drawLine (xx, r.getBottom(), xx + 10, r.getY(), 1.2f); }
-        small (U (t), { x + 24, ly, 90, 16 });
+        g.setColour (c); g.fillRoundedRectangle ((float) x, (float) rowB + 10.0f, 14.0f, 10.0f, 2.0f);
+        small (t, { x + 19, rowB + 7, 50, 16 });
     };
-    swatch (642, col::escuma, "na escala", false);
-    swatch (746, col::sodio, "libre", false);
-    swatch (828, col::lina, U ("fóra").toRawUTF8(), false);
-    small (U ("clic dereito: libre"), { 900, ly, 112, 16 }, juce::Justification::centredRight);
+    swatch (846, col::escuma, "escala");
+    swatch (906, col::sodio, "libre");
+    swatch (962, col::lina, U ("fóra"));
 
     g.setFont (body (12.0f)); g.setColour (col::neboa.withAlpha (0.5f));
     g.drawText (U ("Escoita   42°14′N 8°43′W"), juce::Rectangle<int> (712, 644, 300, 16), juce::Justification::centredRight, false);
@@ -676,12 +696,18 @@ void TuneEditor::paint (juce::Graphics& g)
 
 void TuneEditor::resized()
 {
+    const float sc = (float) getWidth() / (float) W;
+    canvas.setTransform (juce::AffineTransform::scale (sc));
+    proc.uiScale = sc;
+}
+
+void TuneEditor::layout()
+{
     using namespace lay;
-    // cabeceira
-    detect.setBounds (246, 24, 126, 34);
-    tonica.setBounds (384, 24, 84, 34);
-    escala.setBounds (476, 24, 172, 34);
-    voz.setBounds (656, 24, 122, 34);
+    canvas.setBounds (0, 0, W, H);
+    // cabeceira: presets, comparar e xeito
+    preset.setBounds (240, 24, 210, 34);
+    compare.setBounds (460, 24, 120, 34);
     for (int i = 0; i < 2; ++i) calBtn[i].setBounds (790 + i * 111 - (i > 0 ? 1 : 0), 24, 111 + (i > 0 ? 1 : 0), 34);
 
     display.setBounds (28, 84, 984, 240);
@@ -701,7 +727,11 @@ void TuneEditor::resized()
     mest.setBounds (g4 + knobW * 2, ky, knobW, kh);
     vol.setBounds (g4 + knobW * 3, ky, knobW, kh);
 
-    // modo e teclado
-    for (int i = 0; i < 3; ++i) modeBtn[i].setBounds (28 + i * 104 - (i > 0 ? 1 : 0), 494, 104 + (i > 0 ? 1 : 0), 30);
+    // modo, tonalidade e voz, e o teclado
+    for (int i = 0; i < 3; ++i) modeBtn[i].setBounds (28 + i * 104 - (i > 0 ? 1 : 0), rowB, 104 + (i > 0 ? 1 : 0), 30);
+    detect.setBounds (352, rowB, 112, 30);
+    tonica.setBounds (472, rowB, 78, 30);
+    escala.setBounds (558, rowB, 160, 30);
+    voz.setBounds (726, rowB, 112, 30);
     keyboard.setBounds (28, 532, 984, 108);
 }

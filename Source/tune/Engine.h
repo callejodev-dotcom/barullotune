@@ -208,10 +208,11 @@ public:
         pMaxAlloc = (int) std::ceil (sr / PitchDetector::allocMinHz) + 2;
         ringSize = 1; while (ringSize < 10 * pMaxAlloc + 256) ringSize <<= 1;
         in.assign ((size_t) ringSize, 0.0f);
-        out.assign ((size_t) ringSize, 0.0);
+        for (int c = 0; c < 2; ++c) { inCh[c].assign ((size_t) ringSize, 0.0f); outCh[c].assign ((size_t) ringSize, 0.0); }
         unvoicedP = std::max (16.0, std::round (sr * 0.005));
-        xfade = std::max (16, (int) std::lround (sr * 0.00075));
-        dMin = (int) std::ceil (1.1 * xfade) + 4;
+        xfade = std::max (16, (int) std::lround (sr * 0.0006));
+        dMin = (int) std::ceil (1.1 * xfade) + 4 + sincHalf;   // o interpolador mira 8 mostras adiante
+        buildSinc();
         dirAlpha = 1.0 - std::exp (-1.0 / (0.0015 * sr));
         configure (quality, range);
     }
@@ -245,7 +246,7 @@ public:
     void reset()
     {
         std::fill (in.begin(), in.end(), 0.0f);
-        std::fill (out.begin(), out.end(), 0.0);
+        for (int c = 0; c < 2; ++c) { std::fill (inCh[c].begin(), inCh[c].end(), 0.0f); std::fill (outCh[c].begin(), outCh[c].end(), 0.0); }
         detector.reset();
         n = 0;
         // estudio
@@ -267,14 +268,21 @@ public:
     }
     void allNotesOff() { for (auto& h : held) h = 0; heldMask = 0; lastNote = -1; }
 
-    float process (float x)
+    float process (float x) { float y = 0; processFrame (&x, &y, 1); return y; }
+
+    // unha mostra de 1 ou 2 canles: o ton detéctase no centro (L+R)/2 e as dúas canles
+    // corríxense exactamente igual, así a imaxe estéreo non se move
+    void processFrame (const float* x, float* y, int numChannels)
     {
-        in[(size_t) (n & (ringSize - 1))] = x;
-        if (detector.push (x)) updatePitch();
+        nch = numChannels >= 2 ? 2 : 1;
+        const size_t w = (size_t) (n & (ringSize - 1));
+        const float mid = nch == 1 ? x[0] : 0.5f * (x[0] + x[1]);
+        in[w] = mid;
+        for (int c = 0; c < nch; ++c) inCh[c][w] = x[c];
+        if (detector.push (mid)) updatePitch();
         placeMarks();   // os dous xeitos seguen os ciclos da voz
-        const float y = quality == Studio ? studioSample() : directSample();
+        if (quality == Studio) studioSample (y); else directSample (y);
         ++n;
-        return y;
     }
 
     // para a interface
@@ -413,12 +421,47 @@ private:
         return outMidi - m;
     }
 
-    float readAt (double p) const
+    // lectura entre mostras: sinc con xanela de Kaiser, 16 puntos (plana ata ~20 kHz).
+    // A interpolación lineal apagaba os agudos (−3 dB a 14 kHz) e metía un ruído que
+    // cambiaba co ton.
+    static constexpr int sincHalf = 8, sincPhases = 512;
+    void buildSinc()
+    {
+        sinc.assign ((size_t) (sincPhases + 1) * 2 * sincHalf, 0.0f);
+        const double fc = 0.47, beta = 8.0;
+        auto bessel0 = [] (double x) { double s = 1, t = 1; for (int k = 1; k < 30; ++k) { t *= (x / (2.0 * k)) * (x / (2.0 * k)); s += t; } return s; };
+        const double i0b = bessel0 (beta);
+        for (int ph = 0; ph <= sincPhases; ++ph)
+        {
+            const double f = (double) ph / sincPhases;
+            double sum = 0;
+            float* row = &sinc[(size_t) ph * 2 * sincHalf];
+            for (int k = 0; k < 2 * sincHalf; ++k)
+            {
+                const double x = (double) (k - (sincHalf - 1)) - f;          // taps -7 … +8
+                const double r = x / (double) sincHalf;
+                const double w = std::abs (r) >= 1.0 ? 0.0 : bessel0 (beta * std::sqrt (1.0 - r * r)) / i0b;
+                const double v = std::abs (x) < 1e-9 ? 2.0 * fc : std::sin (2.0 * kPi * fc * x) / (kPi * x);
+                row[k] = (float) (v * w); sum += v * w;
+            }
+            for (int k = 0; k < 2 * sincHalf; ++k) row[k] = (float) (row[k] / sum);
+        }
+    }
+
+    float readAt (double p) const { return readFrom (in, p); }
+    float readFrom (const std::vector<float>& buf, double p) const
     {
         const int64_t i0 = (int64_t) std::floor (p);
-        const double f = p - (double) i0;
-        const float a = in[(size_t) (i0 & (ringSize - 1))], b = in[(size_t) ((i0 + 1) & (ringSize - 1))];
-        return (float) (a + (b - a) * f);
+        const double fp = (p - (double) i0) * sincPhases;
+        const int ph = std::min (sincPhases - 1, (int) fp);
+        const float fr = (float) (fp - ph);
+        const float* r0 = &sinc[(size_t) ph * 2 * sincHalf];
+        const float* r1 = r0 + 2 * sincHalf;
+        float acc = 0.0f;
+        const int64_t base = i0 - (sincHalf - 1);
+        for (int k = 0; k < 2 * sincHalf; ++k)
+            acc += (r0[k] + fr * (r1[k] - r0[k])) * buf[(size_t) ((base + k) & (ringSize - 1))];
+        return acc;
     }
 
     // ============================================================ directo
@@ -452,7 +495,7 @@ private:
         return std::max (1.0, std::min (maxJump, (double) bj + frac));
     }
 
-    float directSample()
+    void directSample (float* y)
     {
         // corrección mostra a mostra (co ton detectado agora mesmo)
         double raw = transpose;
@@ -468,12 +511,12 @@ private:
         correctionCents = voiced ? (dirCorr - transpose) * 100.0 : 0.0;
         if (voiced) outputMidi = mNow + dirCorr;
 
-        // saída: un punteiro (ou dous durante un fundido)
-        float y = readAt (rp);
+        // saída: un punteiro (ou dous durante un fundido), o mesmo para cada canle
+        for (int c = 0; c < nch; ++c) y[c] = readFrom (inCh[c], rp);
         if (xfPos >= 0)
         {
             const double w = 0.5 - 0.5 * std::cos (kPi * (xfPos + 0.5) / xfLen);
-            y = (float) (y * (1.0 - w) + readAt (rp2) * w);
+            for (int c = 0; c < nch; ++c) y[c] = (float) (y[c] * (1.0 - w) + readFrom (inCh[c], rp2) * w);
             rp2 += rho;
             if (++xfPos >= xfLen) { rp = rp2; xfPos = -1; }
         }
@@ -501,19 +544,20 @@ private:
                 rp2 = rp + j; xfPos = 0;
             }
         }
-        return y;
     }
 
     // ============================================================ estudio (PSOLA)
     struct Mark { double pos; double period; bool voiced; int target; };
 
-    float studioSample()
+    void studioSample (float* y)
     {
         while (nextSyn <= (double) (n + pMax)) synthesize();
         const size_t o = (size_t) (n & (ringSize - 1));
-        const double y = out[o];   // PSOLA clásico: sen normalizar (cada pulso conserva o seu nivel)
-        out[o] = 0;
-        return (float) y;
+        for (int c = 0; c < nch; ++c)
+        {
+            y[c] = (float) outCh[c][o];   // PSOLA clásico: sen normalizar (cada pulso conserva o seu nivel)
+            outCh[c][o] = 0;
+        }
     }
 
     // marcas de análise (centros de grano), sincronizadas co ton e con precisión de fracción de mostra
@@ -631,7 +675,7 @@ private:
         const double ti = nextSyn - latencySamples;
         const double fr = std::pow (2.0, clampd (formant, -7.0, 7.0) / 12.0);   // lectura máis rápida = formantes máis altos
         const double reach = std::max (1.0, fr);
-        auto ready = [&] (const Mark& m2) { return m2.pos + std::ceil (m2.period * (m2.voiced ? reach : 1.0)) + 2 <= (double) n; };
+        auto ready = [&] (const Mark& m2) { return m2.pos + std::ceil (m2.period * (m2.voiced ? reach : 1.0)) + 2 + sincHalf <= (double) n; };
         // marca máis próxima a ti que xa teña todo o grano dispoñible
         int bestK = -1; double bd = 1e18;
         for (int k = 0; k < nMarks; ++k)
@@ -703,8 +747,8 @@ private:
             const double w = 0.5 * (1.0 + std::cos (kPi * off / P));
             const double sp = src + off * rf;
             const int64_t i0 = (int64_t) std::floor (sp);
-            if (i0 + 1 > n || i0 < n - ringSize + 1) continue;
-            out[(size_t) ((c + k) & (ringSize - 1))] += readAt (sp) * w;
+            if (i0 + sincHalf > n || i0 < n - ringSize + 2 * sincHalf) continue;
+            for (int ch = 0; ch < nch; ++ch) outCh[ch][(size_t) ((c + k) & (ringSize - 1))] += readFrom (inCh[ch], sp) * w;
         }
         nextSyn += spacing;
     }
@@ -718,8 +762,10 @@ private:
     int pMax = 640, pMaxAlloc = 800, latencySamples = 64, ringSize = 8192;
     int xfade = 36, dMin = 44;
     double unvoicedP = 240;
-    std::vector<float> in;
-    std::vector<double> out;
+    std::vector<float> in, sinc;          // in: o centro (para detectar e marcar)
+    std::vector<float> inCh[2];           // cada canle
+    std::vector<double> outCh[2];
+    int nch = 1;
     int64_t n = 0;
 
     // estudio

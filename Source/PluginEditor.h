@@ -97,23 +97,34 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void tick() { timerCallback(); }   // para as probas
+    static constexpr int W = 1040, H = 664;
 
 private:
+    // todo vai debuxado a tamaño fixo nun lenzo que despois se escala co tamaño da xanela
+    struct Canvas : juce::Component
+    {
+        std::function<void (juce::Graphics&)> painter;
+        void paint (juce::Graphics& g) override { if (painter) painter (g); }
+    };
+
     void timerCallback() override;
+    void paintCanvas (juce::Graphics&);
+    void layout();
     void setupKnob (ui::Knob&, const char* id, const char* name, const char* tip);
     void setupSegment (juce::TextButton* b, int count, const char* paramId, const char* const* names, const char* const* tips);
     void refresh();
 
     TuneProcessor& proc;
     ui::Look look;
+    Canvas canvas;
     juce::TooltipWindow tooltips { this, 500 };
 
     ui::Display display { proc };
     ui::Keyboard keyboard { proc };
 
-    juce::ComboBox tonica, escala, voz;
+    juce::ComboBox preset, tonica, escala, voz;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt, vozAtt;
-    juce::TextButton detect, link;
+    juce::TextButton detect, link, compare;
     juce::TextButton modeBtn[3], calBtn[2];
 
     ui::Knob vel, transi, tol, tolT, vib, cant, form, trans, la, mest, vol;

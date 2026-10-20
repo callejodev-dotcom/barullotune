@@ -84,10 +84,13 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
+    // presets de fábrica: só tocan o carácter da corrección (non a tonalidade nin a voz)
+    struct Preset { const char* name; const char* description; float vel, transi, vib, tol, tolT, cant, form, trans; int quality; };
+    static const std::vector<Preset>& presets();
+    int getNumPrograms() override { return (int) presets().size(); }
+    int getCurrentProgram() override { return currentPreset; }
+    void setCurrentProgram (int index) override;
+    const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock&) override;
@@ -133,18 +136,22 @@ private:
     void applyEngineSettings();
 
     tune::Engine engine;
-    std::vector<float> dry;
+    std::array<std::vector<float>, 2> dry;
     int dryPos = 0;
     juce::SmoothedValue<float> mixSm, gainSm;
     int frameCount = 0;
     float levelAcc = 0, outAcc = 0;
     std::atomic<int> latencyNow { 0 };
+    int currentPreset = 0;
+public:
+    std::atomic<float> uiScale { 1.0f };   // tamaño da xanela (gárdase co proxecto)
+private:
 
     std::atomic<bool> keyListening { false };
     std::atomic<float> keyHeard { 0 };
     std::array<std::atomic<float>, 12> keyHist {};
 
-    std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm;
+    std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
     std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib;
     std::array<std::atomic<float>*, 12> pNota {}, pLibre {};
 

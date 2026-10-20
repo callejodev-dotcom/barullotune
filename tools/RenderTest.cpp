@@ -347,6 +347,47 @@ int main (int argc, char** argv)
         if (q == 0) { robot = rb; nat = nt; tr = t5; }
     }
 
+    // estéreo de verdade: L = voz, R = 0,6 · voz atrasada 3 ms -> as dúas canles corríxense igual
+    for (int q = 0; q < 2; ++q)
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        setP (p, "calidade", (float) q); setP (p, "escala", 1); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
+        p.prepareToPlay (SR, 512);
+        const int total = (int) voice.size();
+        juce::AudioBuffer<float> buf (2, 512), outL (1, total), outR (1, total);
+        const int dl = (int) (0.003 * SR);
+        for (int pos = 0; pos < total; pos += 512)
+        {
+            const int nn = juce::jmin (512, total - pos);
+            buf.setSize (2, nn, false, false, true);
+            for (int i = 0; i < nn; ++i)
+            {
+                buf.setSample (0, i, voice[(size_t) (pos + i)]);
+                buf.setSample (1, i, pos + i >= dl ? 0.6f * voice[(size_t) (pos + i - dl)] : 0.0f);
+            }
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            outL.copyFrom (0, pos, buf, 0, 0, nn); outR.copyFrom (0, pos, buf, 1, 0, nn);
+        }
+        // a canle dereita debe ser a esquerda corrixida igual: medímolo co mesmo atraso e ganancia
+        double el = 0, er = 0;
+        for (int i = (int) SR; i < total - dl; ++i) { el += outL.getSample (0, i) * outL.getSample (0, i); er += outR.getSample (0, i + dl) * outR.getSample (0, i + dl); }
+        int lat2 = p.getLatencySamples();
+        auto sl = evaluate (outL, lat2, truth, 0);
+        std::printf ("estéreo %s: esquerda %.1f c, nivel dereita/esquerda %.3f (agardado 0,600)\n", q == 0 ? "directo" : "estudio", sl.outC, std::sqrt (er / el));
+        check (q == 0 ? "directo: estéreo corrixido igual nas dúas canles" : "estudio: estéreo corrixido igual nas dúas canles",
+               sl.outC < (q == 0 ? 8.0 : 3.0) && std::abs (std::sqrt (er / el) - 0.6) < 0.03);
+    }
+
+    // comparar: sae a voz orixinal, aliñada
+    {
+        int l = 0;
+        auto cmp = run (voice, 256, 2, [&] (TuneProcessor& p) { major (p); setP (p, "comparar", 1); }, l);
+        float d = 0;
+        for (int i = 0; i < (int) voice.size(); ++i) d = std::max (d, std::abs (cmp.getSample (0, i + l) - voice[(size_t) i]));
+        check ("comparar = voz orixinal aliñada", d < 1.0e-6f);
+    }
+
     // formantes (estudio): a nota non cambia e o timbre si
     {
         int l1 = 0, l2 = 0;
@@ -415,6 +456,20 @@ int main (int argc, char** argv)
         std::printf ("tonalidade: %s %s\n", scales::noteName ((int) p.params.getRawParameterValue ("tonica")->load()).toRawUTF8(),
                      scales::all()[(size_t) p.params.getRawParameterValue ("escala")->load()].name);
         check ("detectar tonalidade: Do maior (ou a súa relativa)", done && p.effectiveMask() == want);
+    }
+
+    // presets: Robot pon velocidade, transición e vibrato a 0; o preset gárdase co estado
+    {
+        TuneProcessor a;
+        int robot = -1;
+        for (int i = 0; i < a.getNumPrograms(); ++i) if (a.getProgramName (i) == "Robot") robot = i;
+        a.setCurrentProgram (robot);
+        const bool ok1 = robot >= 0 && a.params.getRawParameterValue ("velocidade")->load() < 0.5f
+                      && a.params.getRawParameterValue ("transicion")->load() < 0.5f && a.params.getRawParameterValue ("vibrato")->load() < 0.5f;
+        juce::MemoryBlock mb; a.getStateInformation (mb);
+        TuneProcessor b; b.setStateInformation (mb.getData(), (int) mb.getSize());
+        std::printf ("presets: %d, Robot = %d\n", a.getNumPrograms(), robot);
+        check ("presets: Robot aplícase e gárdase", ok1 && b.getCurrentProgram() == robot);
     }
 
     // estado

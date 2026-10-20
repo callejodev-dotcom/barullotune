@@ -1,0 +1,5 @@
+build/
+dist/
+*.wav
+*.mp3
+__pycache__/

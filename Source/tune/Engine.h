@@ -1,7 +1,16 @@
 // Barullo Tune — motor de corrección de afinación.
-// Detección de tono tipo YIN (sobre la señal diezmada a ~12 kHz) y
-// desplazamiento por TD-PSOLA en tiempo real, que mantiene los formantes.
-// Latencia fija, sin reservas de memoria en el hilo de audio.
+//
+// Detección de ton tipo YIN (sobre a sinal diezmada a ~12 kHz, cada 4 ms) e dous
+// xeitos de mover o ton:
+//
+//  * Directo (latencia < 1 ms): a voz lese a outra velocidade e, cando o punteiro de
+//    lectura se adianta ou se atrasa, salta exactamente un ciclo cun fundido curto
+//    (o método do afinador clásico). Para correccións pequenas os formantes nin se
+//    notan; ao transpor moito, soa a esquío.
+//  * Estudio (latencia 16–34 ms segundo o rango): TD-PSOLA. Mantén os formantes e
+//    permite movelos á parte.
+//
+// Sen reservas de memoria no fío de audio: todo se reserva en prepare().
 #pragma once
 #include <algorithm>
 #include <cmath>
@@ -10,44 +19,62 @@
 
 namespace tune {
 
+constexpr double kPi = 3.14159265358979323846;   // M_PI non existe en MSVC
+
 struct Biquad
 {
     double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
     void lowpass (double fc, double sr, double q = 0.7071)
     {
-        const double w = 2.0 * M_PI * fc / sr, c = std::cos (w), al = std::sin (w) / (2.0 * q), a0 = 1.0 + al;
+        const double w = 2.0 * kPi * fc / sr, c = std::cos (w), al = std::sin (w) / (2.0 * q), a0 = 1.0 + al;
         b0 = (1.0 - c) * 0.5 / a0; b1 = (1.0 - c) / a0; b2 = b0; a1 = -2.0 * c / a0; a2 = (1.0 - al) / a0;
     }
     void reset() { z1 = z2 = 0; }
     double process (double x) { const double y = b0 * x + z1; z1 = b1 * x - a1 * y + z2; z2 = b2 * x - a2 * y; return y; }
 };
 
+static inline double clampd (double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 // ---------------------------------------------------------------- YIN
 class PitchDetector
 {
 public:
-    void prepare (double sampleRate, double minHz, double maxHz)
+    static constexpr double allocMinHz = 60.0;
+
+    void prepare (double sampleRate)
     {
         sr = sampleRate;
         decim = std::max (1, (int) std::lround (sr / 12000.0));
         dsr = sr / decim;
-        tauMin = std::max (2, (int) std::floor (dsr / maxHz));
-        tauMax = (int) std::ceil (dsr / minHz) + 1;
-        win = tauMax;
-        size = 1; while (size < win + tauMax + 4) size <<= 1;
+        const int tauAlloc = (int) std::ceil (dsr / allocMinHz) + 2;
+        size = 1; while (size < 2 * tauAlloc + 8) size <<= 1;
         buf.assign ((size_t) size, 0.0f);
-        d.assign ((size_t) tauMax + 2, 0.0);
+        d.assign ((size_t) tauAlloc + 4, 0.0);
         lp1.lowpass (dsr * 0.42, sr, 0.54); lp2.lowpass (dsr * 0.42, sr, 1.31);
-        hp = 0; hpPrev = 0;
-        hop = std::max (1, (int) std::lround (dsr * 0.004)); // ~4 ms
-        pos = 0; dcount = 0; hcount = 0;
+        hop = std::max (1, (int) std::lround (dsr * 0.004));   // ~4 ms
+        setRange (75.0, 1100.0);
+    }
+
+    void setRange (double minHz, double maxHz)
+    {
+        tauMin = std::max (2, (int) std::floor (dsr / maxHz));
+        tauMax = std::min ((int) d.size() - 3, (int) std::ceil (dsr / minHz) + 1);
+        win = tauMax;
+        reset();
+    }
+
+    void reset()
+    {
+        std::fill (buf.begin(), buf.end(), 0.0f);
+        lp1.reset(); lp2.reset();
+        hp = 0; hpPrev = 0; pos = 0; dcount = 0; hcount = 0;
         period = sr / 220.0; voiced = false; clarity = 0; pending = 0; misses = 0;
     }
 
-    // devuelve true cuando hay una estimación nueva
+    // devolve true cando hai unha estimación nova
     bool push (float x)
     {
-        // pasa altos suave (quita DC y retumbe) + paso bajo antialias
+        // pasa altos suave (quita DC e retumbo) + paso baixo antialias
         const double h = x - hpPrev + 0.995 * hp; hpPrev = x; hp = h;
         const double y = lp2.process (lp1.process (h));
         if (++dcount < decim) return false;
@@ -59,13 +86,12 @@ public:
         return true;
     }
 
-    double period = 0;   // en muestras de la frecuencia original
-    bool voiced = false;
-    double clarity = 0;  // 1 - mínimo de la diferencia normalizada
-    double threshold = 0.2, gate = 1.0e-4;
-    double pending = 0;
     double hopSeconds() const { return (double) hop * decim / sr; }
-    int misses = 0;
+
+    double period = 0;   // en mostras da frecuencia orixinal
+    bool voiced = false;
+    double clarity = 0;  // 1 - mínimo da diferenza normalizada
+    double threshold = 0.2, gate = 1.0e-4;
 
 private:
     void analyse()
@@ -130,12 +156,11 @@ private:
         if (! voiced)
         {
             // comezo de nota: fai falta que dúas lecturas seguidas coincidan (±0,6 semitonos)
-            if (pending > 0 && std::abs (std::log2 (p / pending)) < 0.05) { period = p; voiced = true; }
+            if (pending > 0 && std::abs (std::log2 (p / pending)) < 0.05) { period = p; voiced = true; misses = 0; }
             pending = p;
             return;
         }
         period = p;
-        voiced = true;
         misses = 0;
     }
 
@@ -147,6 +172,8 @@ private:
     double hp = 0, hpPrev = 0;
     int64_t pos = 0;
     int dcount = 0, hcount = 0;
+    double pending = 0;
+    int misses = 0;
 };
 
 // ---------------------------------------------------------------- motor
@@ -154,44 +181,82 @@ class Engine
 {
 public:
     enum Mode { ScaleMode = 0, MidiScale = 1, MidiNote = 2 };
+    enum Quality { Direct = 0, Studio = 1 };
+    // tipos de voz: rango do detector (e latencia en estudio)
+    enum Range { Bass = 0, Baritone, Tenor, Alto, Mezzo, Soprano, General, numRanges };
 
-    // parámetros
+    // parámetros (pódense cambiar en calquera momento)
     double refA = 440.0;       // La4
     int key = 0;               // tónica 0 = Do
     uint16_t scale = 0x0FFF;   // bit i = grado i (cromática por defecto)
-    double speedMs = 0.0;      // 0 = robot; ~50-400 = natural
-    double amount = 1.0;       // 0..1 cuánto se corrixe
-    double humanize = 0.0;     // 0..1 notas largas se corrixen máis amodo
+    uint16_t freeMask = 0;     // notas «libres»: cando a voz vai a elas, non se corrixe
+    double speedMs = 0.0;      // canto tarda en afinar dentro dunha nota (0 = ao momento)
+    double transitionMs = 0.0; // canto tarda en pasar dunha nota á seguinte
+    double tolCents = 0.0;     // desafinacións menores ca isto non se tocan
+    double tolMs = 0.0;        // e as maiores, só se duran máis ca isto
+    double vibrato = 1.0;      // 0..2: canto vibrato da voz pasa á saída
+    double amount = 1.0;       // 0..1 canto se corrixe
     int mode = ScaleMode;
     double transpose = 0.0;    // semitonos
+    double formant = 0.0;      // semitonos (só en Estudio)
 
     void prepare (double sampleRate)
     {
         sr = sampleRate;
-        detector.prepare (sr, minHz, maxHz);
+        detector.prepare (sr);
         decisionAlpha = 1.0 - std::exp (-detector.hopSeconds() / 0.04);
-        pMax = (int) std::ceil (sr / minHz) + 2;
-        latencySamples = (int) std::ceil (2.5 * pMax) + 32;
-        ringSize = 1; while (ringSize < latencySamples + 4 * pMax + 64) ringSize <<= 1;
+        pMaxAlloc = (int) std::ceil (sr / PitchDetector::allocMinHz) + 2;
+        ringSize = 1; while (ringSize < 10 * pMaxAlloc + 256) ringSize <<= 1;
         in.assign ((size_t) ringSize, 0.0f);
         out.assign ((size_t) ringSize, 0.0);
         unvoicedP = std::max (16.0, std::round (sr * 0.005));
+        xfade = std::max (16, (int) std::lround (sr * 0.00075));
+        dMin = (int) std::ceil (1.1 * xfade) + 4;
+        dirAlpha = 1.0 - std::exp (-1.0 / (0.0015 * sr));
+        configure (quality, range);
+    }
+
+    // cambia o xeito e o rango (cambia a latencia; volve empezar)
+    void configure (int q, int r)
+    {
+        quality = q == Studio ? Studio : Direct;
+        range = std::max (0, std::min ((int) numRanges - 1, r));
+        double lo, hi;
+        rangeHz (range, lo, hi);
+        detector.setRange (lo, hi);
+        pMax = (int) std::ceil (sr / lo) + 2;
+        latencySamples = quality == Studio ? (int) std::ceil (2.5 * pMax) + 32 : dMin;
         reset();
     }
+
+    static void rangeHz (int r, double& lo, double& hi)
+    {
+        //                                    baixo barítono tenor alto mezzo soprano calquera
+        static const double mins[numRanges] = {  60,  75,  95, 130,  150,  180,   70 };
+        static const double maxs[numRanges] = { 420, 520, 680, 900, 1050, 1350, 1100 };
+        r = std::max (0, std::min ((int) numRanges - 1, r));
+        lo = mins[r]; hi = maxs[r];
+    }
+
+    int latency() const { return latencySamples; }
+    int currentQuality() const { return quality; }
+    int currentRange() const { return range; }
 
     void reset()
     {
         std::fill (in.begin(), in.end(), 0.0f);
         std::fill (out.begin(), out.end(), 0.0);
-        n = 0; nMarks = 0; firstMark = 0;
-        lastMark = 0; lastMarkVoiced = false;
-        nextSyn = (double) pMax; srcOff = -(double) latencySamples; synCorr = 0; synVoiced = false; effMs = 0; target = -1; heldMask = 0; lastNote = -1;
-        for (auto& h : held) h = 0;
-        stableSamples = 0;
-        voiced = false; detectedHz = 0; correctionCents = 0;
+        detector.reset();
+        n = 0;
+        // estudio
+        nMarks = 0; firstMark = 0; lastMark = 0; lastMarkVoiced = false;
+        nextSyn = (double) pMax; srcOff = -(double) latencySamples; synVoiced = false; studioState = {};
+        // directo
+        rp = -(double) dMin; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; cycleOk = false; directState = {};
+        // común
+        target = -1; mSmooth = 0;
+        voiced = false; detectedHz = 0; correctionCents = 0; inputMidi = 0; outputMidi = 0;
     }
-
-    int latency() const { return latencySamples; }
 
     void noteOn (int note) { if (note >= 0 && note < 128) { held[note] = 1; lastNote = note; recomputeHeld(); } }
     void noteOff (int note)
@@ -205,28 +270,22 @@ public:
     float process (float x)
     {
         in[(size_t) (n & (ringSize - 1))] = x;
-
         if (detector.push (x)) updatePitch();
-        smoothCorrection();
-        placeMarks();
-        while (nextSyn <= (double) (n + pMax)) synthesize();
-
-        const size_t o = (size_t) (n & (ringSize - 1));
-        const double y = out[o];   // PSOLA clásico: sen normalizar (cada pulso conserva o seu nivel)
-        out[o] = 0;
+        placeMarks();   // os dous xeitos seguen os ciclos da voz
+        const float y = quality == Studio ? studioSample() : directSample();
         ++n;
-        return (float) y;
+        return y;
     }
 
-    // para la interfaz
+    // para a interface
     bool voiced = false;
     double detectedHz = 0, correctionCents = 0, inputMidi = 0, outputMidi = 0;
+    double clarity() const { return detector.clarity; }
     uint16_t heldPitchClasses() const { return heldMask; }
     int targetNote() const { return target; }
 
 private:
-    struct Mark { double pos; double period; bool voiced; int target; };
-
+    // ============================================================ común
     void recomputeHeld()
     {
         heldMask = 0;
@@ -238,57 +297,223 @@ private:
         const int pc = ((note % 12) + 12) % 12;
         if ((mode == MidiScale || mode == MidiNote) && heldMask != 0) return (heldMask >> pc) & 1;
         const int deg = ((pc - key) % 12 + 12) % 12;
-        return (scale >> deg) & 1;
+        return ((scale | freeMask) >> deg) & 1;
+    }
+
+    bool isFree (int note) const
+    {
+        if ((mode == MidiScale || mode == MidiNote) && heldMask != 0) return false;
+        const int deg = (((note % 12) + 12) % 12 - key + 12) % 12;
+        return (freeMask >> deg) & 1;
     }
 
     void updatePitch()
     {
         const bool was = voiced;
         voiced = detector.voiced;
-        if (! voiced) { stableSamples = 0; return; }
+        if (! voiced) return;
         curP = detector.period;
         detectedHz = sr / curP;
         const double m = 69.0 + 12.0 * std::log2 (detectedHz / refA);
         // a nota de destino decídese co ton suavizado (sen vibrato), para que un vibrato
         // ancho ou unha voz a medio camiño entre dúas notas non faga saltar o destino
-        if (! was) mSmooth = m;
+        // ton para decidir a nota: suavizado 40 ms
+        const double dtd = detector.hopSeconds() * sr;
+        if (! was) { mSmooth = m; candidate = -1; candHeld = 0; }
         else mSmooth += (m - mSmooth) * decisionAlpha;
         const double md = mSmooth;
 
         int t = target;
         if (mode == MidiNote && lastNote >= 0)
         {
-            // nota exacta: a octava máis próxima á voz
+            // nota exacta: a oitava máis próxima á voz
             t = lastNote;
             while (t - md > 6.0) t -= 12;
             while (md - t > 6.0) t += 12;
         }
         else
         {
-            // nota permitida máis próxima, con histérese
-            const bool keep = t >= 0 && allowed (t) && std::abs (md - t) < 0.6;
-            if (! keep)
+            // nota permitida máis próxima, con histérese: unha nota nova acéptase se dura
+            // 25 ms ou se o salto é claro (case un semitono); así as voces que oscilan entre
+            // dúas notas non fan bailar o destino
+            int best = -1; double bd = 1e9;
+            const int c = (int) std::lround (md);
+            for (int k = c - 7; k <= c + 7; ++k)
+                if (allowed (k) && std::abs (md - k) < bd) { bd = std::abs (md - k); best = k; }
+            if (best < 0) best = c;
+            const bool keep = was && t >= 0 && allowed (t) && std::abs (md - t) < 0.6;
+            if (! keep && best != t)
             {
-                int best = -1; double bd = 1e9;
-                const int c = (int) std::lround (md);
-                for (int k = c - 7; k <= c + 7; ++k)
-                    if (allowed (k) && std::abs (md - k) < bd) { bd = std::abs (md - k); best = k; }
-                t = best >= 0 ? best : c;
+                if (best != candidate) { candidate = best; candHeld = 0; }
+                candHeld += dtd;
+                if (! was || t < 0 || ! allowed (t) || std::abs (md - t) > 0.9 || candHeld >= 0.025 * sr) t = best;
             }
+            else candidate = -1;
         }
-        if (t != target || ! was) stableSamples = 0;
         target = t;
         inputMidi = m;
     }
 
-    // tempo de corrección actual (humanizar: as notas longas relaxan a corrección)
-    void smoothCorrection()
+    // ---- o modelo de corrección (o mesmo para os dous xeitos) ----
+    // O vibrato sácase cun filtro de banda (3–8 Hz) sobre o ton; o resto é o «centro» da voz.
+    // O centro achégase á nota con «velocidade»; a nota de destino móvese dunha a outra
+    // con «transición»; o vibrato volve sumarse multiplicado por «vibrato».
+    struct CorrState
     {
-        double ms = speedMs;
-        if (voiced) stableSamples++;
-        if (humanize > 0)
-            ms += humanize * 150.0 * std::min (1.0, (stableSamples / sr) / 0.5);
-        effMs = ms;
+        bool active = false; int lastTarget = -1;
+        double tS = 0, cS = 0, vibRamp = 0, tolTimer = 0;
+        double ic1 = 0, ic2 = 0;   // filtro de estado (TPT) do vibrato
+    };
+
+    double alphaFor (double ms, double dt) const { return ms <= 0.0 ? 1.0 : 1.0 - std::exp (-dt / (ms * 0.001 * sr)); }
+
+    // banda do vibrato: pasa banda de 5,5 Hz, Q 1,2 (ganancia 1 no centro); dt en mostras
+    double vibratoBand (CorrState& st, double m, double dt) const
+    {
+        const double k = 1.0 / 1.2;
+        const double gg = std::tan (kPi * std::min (0.45, 5.5 * dt / sr));
+        const double a1 = 1.0 / (1.0 + gg * (gg + k)), a2 = gg * a1, a3 = gg * a2;
+        const double v3 = m - st.ic2;
+        const double v1 = a1 * st.ic1 + a2 * v3, v2 = st.ic2 + a2 * st.ic1 + a3 * v3;
+        st.ic1 = 2.0 * v1 - st.ic1; st.ic2 = 2.0 * v2 - st.ic2;
+        return k * v1;
+    }
+
+    // corrección en semitonos para unha voz en m (MIDI) que vai a tgt; dt = mostras desde o paso anterior
+    double correctionStep (CorrState& st, double m, int tgt, double dt, double& outMidi)
+    {
+        const bool free = isFree (tgt);
+        if (! st.active)
+        {
+            // comezo dunha nota: xa afinada
+            st.active = true; st.tS = tgt; st.vibRamp = 0; st.tolTimer = 0;
+            st.ic1 = 0; st.ic2 = m;
+            const double err = st.tS - m;
+            st.cS = (free || std::abs (err) * 100.0 < tolCents) ? 0.0 : err * amount;
+            st.lastTarget = tgt;
+            outMidi = m + st.cS + transpose;
+            return st.cS + transpose;
+        }
+        if (tgt != st.lastTarget) st.vibRamp = 0;   // nota nova: o vibrato volve entrar amodo
+        st.lastTarget = tgt;
+        st.tS += (tgt - st.tS) * alphaFor (transitionMs, dt);
+        st.vibRamp = std::min (1.0, st.vibRamp + dt / (0.10 * sr));
+        const double vib = clampd (vibratoBand (st, m, dt), -1.5, 1.5) * st.vibRamp;
+        const double centre = m - vib;
+        const double err = st.tS - centre;
+        double want = 0.0;
+        if (! free)
+        {
+            const bool outside = std::abs (err) * 100.0 >= tolCents;
+            st.tolTimer = outside ? st.tolTimer + dt : 0.0;
+            if (outside && st.tolTimer >= tolMs * 0.001 * sr) want = err * amount;
+        }
+        st.cS += (want - st.cS) * alphaFor (speedMs, dt);
+        outMidi = centre + st.cS + vibrato * vib + transpose;
+        return outMidi - m;
+    }
+
+    float readAt (double p) const
+    {
+        const int64_t i0 = (int64_t) std::floor (p);
+        const double f = p - (double) i0;
+        const float a = in[(size_t) (i0 & (ringSize - 1))], b = in[(size_t) ((i0 + 1) & (ringSize - 1))];
+        return (float) (a + (b - a) * f);
+    }
+
+    // ============================================================ directo
+    // Mellor salto (arredor de nominal, en ±range) para que o tramo que empeza en p+sign·j
+    // se pareza ao que empeza en p: correlación normalizada sobre o fundido + parábola.
+    double bestJump (double p, double nominal, double spread, double sign, double maxJump, int len)
+    {
+        const int lo = std::max (1, (int) std::floor (nominal - spread));
+        const int hi = std::min ({ (int) std::floor (maxJump), (int) std::ceil (nominal + spread), lo + maxSearch - 1 });
+        if (hi < lo) return std::max (1.0, std::min (nominal, maxJump));
+        const int64_t base = (int64_t) std::floor (p);
+        auto X = [this] (int64_t i) { return (double) in[(size_t) (i & (ringSize - 1))]; };
+        double aa = 1e-12;
+        for (int k = 0; k < len; ++k) aa += X (base + k) * X (base + k);
+        int bj = lo; double best = -1e30;
+        for (int j = lo; j <= hi; ++j)
+        {
+            const int64_t qb = base + (int64_t) (sign * j);
+            double ab = 0, bb = 1e-12;
+            for (int k = 0; k < len; ++k) { const double x1 = X (qb + k); ab += X (base + k) * x1; bb += x1 * x1; }
+            const double sc = ab / std::sqrt (aa * bb);
+            score[j - lo] = sc;
+            if (sc > best) { best = sc; bj = j; }
+        }
+        double frac = 0;
+        if (bj > lo && bj < hi)
+        {
+            const double y0 = score[bj - lo - 1], y1 = score[bj - lo], y2 = score[bj - lo + 1], den = y0 - 2 * y1 + y2;
+            if (den < 0) frac = clampd (0.5 * (y0 - y2) / den, -0.5, 0.5);
+        }
+        return std::max (1.0, std::min (maxJump, (double) bj + frac));
+    }
+
+    float directSample()
+    {
+        // corrección mostra a mostra (co ton detectado agora mesmo)
+        double raw = transpose;
+        double mNow = inputMidi;
+        if (voiced && cycleOk)
+            mNow = cycleM + cycleSlope * clampd (rp - cycleT, 0.0, 4.0 * curP);   // o ton xusto onde se está lendo
+        const bool starting = voiced && target >= 0 && ! directState.active;
+        if (voiced && target >= 0) { double om; raw = correctionStep (directState, mNow, target, 1.0, om); }
+        else directState.active = false;
+        if (starting) dirCorr = raw;
+        else dirCorr += (raw - dirCorr) * dirAlpha;   // 1,5 ms de suavizado, para que non rasque
+        rho = std::pow (2.0, dirCorr / 12.0);
+        correctionCents = voiced ? (dirCorr - transpose) * 100.0 : 0.0;
+        if (voiced) outputMidi = mNow + dirCorr;
+
+        // saída: un punteiro (ou dous durante un fundido)
+        float y = readAt (rp);
+        if (xfPos >= 0)
+        {
+            const double w = 0.5 - 0.5 * std::cos (kPi * (xfPos + 0.5) / xfLen);
+            y = (float) (y * (1.0 - w) + readAt (rp2) * w);
+            rp2 += rho;
+            if (++xfPos >= xfLen) { rp = rp2; xfPos = -1; }
+        }
+        rp += rho;
+
+        // ¿fai falta saltar un ciclo?
+        if (xfPos < 0)
+        {
+            const double D = (double) n - rp;     // atraso actual
+            const double P = voiced ? curP : 2.0 * unvoicedP;
+            // o salto escóllese comparando medio ciclo (o fundido é curto: así non mestura dous ciclos distintos)
+            const int cmp = (int) clampd (P * 0.5, (double) xfade, 2048.0);
+            xfLen = xfade;
+            if (rho > 1.0 && D < (double) dMin)
+            {
+                // a lectura alcanza a escritura (ton para arriba): volve atrás un ciclo
+                const double j = voiced ? bestJump (rp, P, P * 0.12, -1.0, (double) (ringSize / 2), std::min (cmp, (int) D - 2)) : P;
+                rp2 = rp - j; xfPos = 0;
+            }
+            else if (rho <= 1.0 && D >= (double) dMin + 1.25 * P)
+            {
+                // a lectura quedou atrás (ton para abaixo): salta un ciclo adiante, así o atraso nunca medra
+                const double maxJ = D - (double) dMin - 2.0;
+                const double j = voiced ? bestJump (rp, P, P * 0.12, +1.0, maxJ, std::min (cmp, (int) (D - maxJ) - 2)) : std::min (P, maxJ);
+                rp2 = rp + j; xfPos = 0;
+            }
+        }
+        return y;
+    }
+
+    // ============================================================ estudio (PSOLA)
+    struct Mark { double pos; double period; bool voiced; int target; };
+
+    float studioSample()
+    {
+        while (nextSyn <= (double) (n + pMax)) synthesize();
+        const size_t o = (size_t) (n & (ringSize - 1));
+        const double y = out[o];   // PSOLA clásico: sen normalizar (cada pulso conserva o seu nivel)
+        out[o] = 0;
+        return (float) y;
     }
 
     // marcas de análise (centros de grano), sincronizadas co ton e con precisión de fracción de mostra
@@ -302,16 +527,17 @@ private:
             const double lastFrac = lastMark - (double) last;
             int64_t c = (nMarks == 0) ? n - (int64_t) (2 * P) : last + (int64_t) std::lround (P);
             const int search = voiced ? (int) (P * (lastMarkVoiced ? 0.2 : 0.5)) : 0;
-            if (c + search + (int64_t) P + 1 > n) break;
+            // para comparar fai falta medio ciclo despois da marca (o grano enteiro xa o mira estudio ao usala)
+            if (c + search + std::max<int64_t> (8, (int64_t) (P * 0.5)) + 1 > n) break;
             double pos = (double) c;
             if (search > 0 && lastMarkVoiced && nMarks > 0)
             {
                 // a marca nova vai ao mesmo punto do ciclo cá anterior: o desprazamento co que
                 // o ciclo seguinte se parece máis ao actual (correlación normalizada + parábola)
                 const int h = std::max (8, (int) (P * 0.5));
-                const int nS = 2 * search + 1;
+                const int nS = std::min (2 * search + 1, maxSearch);
                 double best = -1e30; int bi = 0;
-                for (int j = 0; j < nS && j < maxSearch; ++j)
+                for (int j = 0; j < nS; ++j)
                 {
                     const int64_t i = c - search + j;
                     double ab = 0, bb = 1e-12;
@@ -320,10 +546,10 @@ private:
                     if (score[j] > best) { best = score[j]; bi = j; }
                 }
                 double frac = 0;
-                if (bi > 0 && bi < std::min (nS, maxSearch) - 1)
+                if (bi > 0 && bi < nS - 1)
                 {
                     const double y0 = score[bi - 1], y1 = score[bi], y2 = score[bi + 1], den = y0 - 2 * y1 + y2;
-                    if (den < 0) frac = juce_clamp (0.5 * (y0 - y2) / den, -0.5, 0.5);
+                    if (den < 0) frac = clampd (0.5 * (y0 - y2) / den, -0.5, 0.5);
                 }
                 pos = (double) (c - search + bi) + frac + lastFrac;
                 pos = std::max (pos, lastMark + P * 0.6);
@@ -344,15 +570,46 @@ private:
             mk = { pos, P, voiced, target };
             if (nMarks < maxMarks) ++nMarks; else firstMark = (firstMark + 1) % maxMarks;
             lastMark = pos; lastMarkVoiced = voiced;
+            updateCycle();
         }
         // tira as marcas vellas
-        while (nMarks > 2 && marks[(size_t) firstMark].pos < (double) (n - latencySamples - 3 * pMax))
+        while (nMarks > 2 && marks[(size_t) firstMark].pos < (double) (n - latencySamples - 4 * pMax))
         { firstMark = (firstMark + 1) % maxMarks; --nMarks; }
     }
 
-    static double juce_clamp (double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
     const Mark& markAt (int k) const { return marks[(size_t) ((firstMark + k) % maxMarks)]; }
+
+    // ton dos dous últimos ciclos medidos e a súa tendencia (para o xeito directo, que
+    // le a voz case ao momento e non pode esperar polo detector)
+    void updateCycle()
+    {
+        // recta axustada ao ton dos últimos ciclos (mínimos cadrados): o ton e a tendencia
+        // sen o tremor ciclo a ciclo dunha voz real
+        cycleOk = false;
+        constexpr int K = 3;
+        if (nMarks < K + 1) return;
+        double t[K], m[K];
+        for (int i = 0; i < K; ++i)
+        {
+            const Mark& a = markAt (nMarks - 1 - i); const Mark& b = markAt (nMarks - 2 - i);
+            if (! (a.voiced && b.voiced)) return;
+            const double p = a.pos - b.pos;
+            if (p < curP * 0.92 || p > curP * 1.09) return;   // máis de semitono e medio do detector: marca dubidosa
+            t[i] = 0.5 * (a.pos + b.pos);
+            m[i] = 69.0 + 12.0 * std::log2 (sr / p / refA);
+        }
+        double tm = 0, mm = 0;
+        for (int i = 0; i < K; ++i) { tm += t[i]; mm += m[i]; }
+        tm /= K; mm /= K;
+        double num = 0, den = 0;
+        for (int i = 0; i < K; ++i) { num += (t[i] - tm) * (m[i] - mm); den += (t[i] - tm) * (t[i] - tm); }
+        double res = 0;
+        for (int i = 0; i < K; ++i) { const double e = m[i] - (mm + (den > 0 ? num / den : 0.0) * (t[i] - tm)); res += e * e; }
+        if (std::sqrt (res / K) > 0.12) return;   // ciclos que non casan (máis de 12 cents fóra da recta): mellor o detector
+        const double maxSlope = 25.0 / sr;   // 25 semitonos por segundo, como moito
+        cycleSlope = den > 0 ? clampd (num / den, -maxSlope, maxSlope) : 0.0;
+        cycleM = mm; cycleT = tm; cycleOk = true;
+    }
 
     // período local dun grano: a distancia ás marcas veciñas (máis exacta có detector,
     // que vai uns milisegundos atrasado e cun vibrato rápido erra decenas de cents)
@@ -372,12 +629,15 @@ private:
     void synthesize()
     {
         const double ti = nextSyn - latencySamples;
+        const double fr = std::pow (2.0, clampd (formant, -7.0, 7.0) / 12.0);   // lectura máis rápida = formantes máis altos
+        const double reach = std::max (1.0, fr);
+        auto ready = [&] (const Mark& m2) { return m2.pos + std::ceil (m2.period * (m2.voiced ? reach : 1.0)) + 2 <= (double) n; };
         // marca máis próxima a ti que xa teña todo o grano dispoñible
         int bestK = -1; double bd = 1e18;
         for (int k = 0; k < nMarks; ++k)
         {
             const Mark& mk = markAt (k);
-            if (mk.pos + std::ceil (mk.period) + 2 > (double) n) continue;
+            if (! ready (mk)) continue;
             const double dd = std::abs (mk.pos - ti);
             if (dd < bd) { bd = dd; bestK = k; }
         }
@@ -391,7 +651,7 @@ private:
             for (int k = 0; k < nMarks; ++k)
             {
                 const Mark& m2 = markAt (k);
-                if (! m2.voiced || m2.pos + std::ceil (m2.period) + 2 > (double) n) continue;
+                if (! m2.voiced || ! ready (m2)) continue;
                 const double dd = std::abs (m2.pos - want);
                 if (dd < bd2) { bd2 = dd; bestK = k; }
             }
@@ -400,30 +660,26 @@ private:
         }
         const Mark mk = markAt (bestK);
 
-        double P = mk.period, spacing = P;
+        double P = mk.period, spacing = P, rf = 1.0;
         if (mk.voiced && mk.target >= 0)
         {
             // cada grano co seu propio ton: a corrección calcúlase co período deste grano,
             // así a saída cae xusto na nota aínda que a voz se estea movendo
             P = localPeriod (bestK);
             const double m = 69.0 + 12.0 * std::log2 (sr / P / refA);
-            const double raw = (mk.target - m) * amount + transpose;
-            if (! synVoiced) synCorr = raw;   // ao comezar unha nota, xa afinada
-            else
-            {
-                const double a = effMs <= 0.0 ? 1.0 : 1.0 - std::exp (-P / (effMs * 0.001 * sr));
-                synCorr += (raw - synCorr) * a;
-            }
+            double om = m;
+            const double corr = correctionStep (studioState, m, mk.target, P, om);
             synVoiced = true;
-            spacing = P / std::pow (2.0, synCorr / 12.0);
-            correctionCents = synCorr * 100.0;
-            outputMidi = m + synCorr;
+            spacing = P / std::pow (2.0, corr / 12.0);
+            correctionCents = (corr - transpose) * 100.0;
+            outputMidi = om;
+            rf = fr;
         }
         else
         {
-            // xordo: OLA sen cambio de tempo, collendo do mesmo instante
+            // xordo: OLA sen cambio de tempo
             P = unvoicedP; spacing = P;
-            synVoiced = false; correctionCents = 0;
+            synVoiced = false; studioState.active = false; correctionCents = 0;
         }
         const int half = (int) std::ceil (P);
         const int64_t c = (int64_t) std::floor (nextSyn);
@@ -435,51 +691,57 @@ private:
             // xordo: lectura continua desde onde quedou, achegándose amodo ao atraso nominal
             const double nominal = -(double) latencySamples;
             const double step = P * 0.08;
-            srcOff += std::max (-step, std::min (step, nominal - srcOff));
+            srcOff += clampd (nominal - srcOff, -step, step);
             src = nextSyn + srcOff;
         }
         if (mk.voiced && synVoiced) srcOff = mk.pos - nextSyn;
         for (int k = -half; k <= half; ++k)
         {
-            const double off = k - frac;          // distancia ao centro do grano
+            const double off = k - frac;          // distancia ao centro do grano (na saída)
             if (std::abs (off) >= P) continue;
-            const double w = 0.5 * (1.0 + std::cos (M_PI * off / P));
-            const double sp = src + off;
-            const int64_t i0 = (int64_t) std::floor (sp);
-            const double f = sp - (double) i0;
-            if (i0 + 1 > n || i0 < n - ringSize + 1) continue;
-            const double a = in[(size_t) (i0 & (ringSize - 1))], b = in[(size_t) ((i0 + 1) & (ringSize - 1))];
-            const size_t o = (size_t) ((c + k) & (ringSize - 1));
             if (c + k < n) continue;
-            out[o] += (a + (b - a) * f) * w;
+            const double w = 0.5 * (1.0 + std::cos (kPi * off / P));
+            const double sp = src + off * rf;
+            const int64_t i0 = (int64_t) std::floor (sp);
+            if (i0 + 1 > n || i0 < n - ringSize + 1) continue;
+            out[(size_t) ((c + k) & (ringSize - 1))] += readAt (sp) * w;
         }
         nextSyn += spacing;
     }
 
-    static constexpr double minHz = 75.0, maxHz = 1100.0;
     static constexpr int maxMarks = 512, maxSearch = 512;
     double score[maxSearch] {};
 
     double sr = 48000;
     PitchDetector detector;
-    int pMax = 640, latencySamples = 1700, ringSize = 8192;
+    int quality = Direct, range = General;
+    int pMax = 640, pMaxAlloc = 800, latencySamples = 64, ringSize = 8192;
+    int xfade = 36, dMin = 44;
     double unvoicedP = 240;
     std::vector<float> in;
     std::vector<double> out;
     int64_t n = 0;
 
+    // estudio
     Mark marks[maxMarks] {};
     int firstMark = 0, nMarks = 0;
     double lastMark = 0; bool lastMarkVoiced = false;
-    double nextSyn = 0;
-
-    double curP = 200, effMs = 0, synCorr = 0, mSmooth = 0, decisionAlpha = 0.1;
+    double nextSyn = 0, srcOff = 0;
+    CorrState studioState, directState;
     bool synVoiced = false;
-    double srcOff = 0;
+
+    // directo
+    double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01;
+    double cycleM = 0, cycleT = 0, cycleSlope = 0;
+    bool cycleOk = false;
+    int xfPos = -1, xfLen = 36;
+
+    // común
+    double curP = 200, mSmooth = 0, decisionAlpha = 0.1, candHeld = 0;
+    int candidate = -1;
     int target = -1, lastNote = -1;
     uint8_t held[128] {};
     uint16_t heldMask = 0;
-    int64_t stableSamples = 0;
 };
 
 } // namespace tune

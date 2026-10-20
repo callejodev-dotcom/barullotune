@@ -4,34 +4,22 @@
 
 namespace ui
 {
-    // Mesma familia ca Barullo FM: corpo negro, botóns de goma, rótulos verde auga e
-    // ámbar, ventás de LED vermello.
+    // Noite de Vigo: o azul mariño de Escoita, a luz de sodio das farolas para a túa voz
+    // e a escuma do mar para a voz afinada.
     namespace col
     {
-        const juce::Colour body      { 0xff151517 };
-        const juce::Colour bodyHi    { 0xff1e1f22 };
-        const juce::Colour bodyLo    { 0xff0b0b0c };
-        const juce::Colour line      { 0xff3b3c41 };
-        const juce::Colour rubber    { 0xff4a4b50 };
-        const juce::Colour print     { 0xffd8d5cc };
-        const juce::Colour printDim  { 0xff9a9ca3 };
-        const juce::Colour teal      { 0xff58c6a0 };
-        const juce::Colour amber     { 0xffe9a24a };
-        const juce::Colour gold      { 0xffc9a648 };
-        const juce::Colour redBtn    { 0xffd8483c };
-        const juce::Colour led       { 0xffff3b2f };
-        const juce::Colour ledOff    { 0xff2b0806 };
-        const juce::Colour ledBg     { 0xff120302 };
-        const juce::Colour green     { 0xff45e39a };
-        const juce::Colour greenOff  { 0xff10291d };
-        const juce::Colour ivory     { 0xfff4f3ee };
-        const juce::Colour blackKey  { 0xff1a1b1e };
+        const juce::Colour noite   { 0xff0c111f };   // fondo (o da web de Escoita)
+        const juce::Colour fondo2  { 0xff10172a };   // paneis
+        const juce::Colour carril  { 0xff172038 };   // carrís das notas da escala
+        const juce::Colour lina    { 0xff28314b };   // liñas e bordos
+        const juce::Colour neboa   { 0xff8d97b0 };   // texto secundario
+        const juce::Colour escuma  { 0xffeef3ff };   // texto e voz afinada
+        const juce::Colour sodio   { 0xfff2a23a };   // a túa voz e os controis activos
     }
 
     juce::Font body (float size);
-    juce::Font bold (float size);
+    juce::Font semi (float size);
     juce::Font cond (float size);
-    void printed (juce::Graphics&, const juce::String&, juce::Rectangle<float>, float size, juce::Colour, juce::Justification, float tracking = 0.08f);
 
     struct Look : juce::LookAndFeel_V4
     {
@@ -39,64 +27,64 @@ namespace ui
         juce::Typeface::Ptr getTypefaceForFont (const juce::Font&) override;
         void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
         void drawButtonText (juce::Graphics&, juce::TextButton&, bool over, bool down) override;
-        void drawLinearSlider (juce::Graphics&, int x, int y, int w, int h, float pos, float minPos, float maxPos,
-                               juce::Slider::SliderStyle, juce::Slider&) override;
-        juce::Label* createSliderTextBox (juce::Slider&) override;
+        void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider&) override;
         void drawLabel (juce::Graphics&, juce::Label&) override;
         void drawTooltip (juce::Graphics&, const juce::String&, int w, int h) override;
         juce::Rectangle<int> getTooltipBounds (const juce::String&, juce::Point<int>, juce::Rectangle<int>) override;
         void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
-        juce::Font getComboBoxFont (juce::ComboBox&) override { return bold (15.0f); }
-        juce::Font getPopupMenuFont() override { return body (15.0f); }
+        juce::Font getComboBoxFont (juce::ComboBox&) override { return semi (16.0f); }
+        juce::Font getPopupMenuFont() override { return body (16.0f); }
         void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
+        void drawPopupMenuBackground (juce::Graphics&, int w, int h) override;
     };
 
-    // a nota e o medidor de afinación
-    class NoteView : public juce::Component
+    // a pantalla central: medidores de nivel, a nota cun arco de cents e o rastro do ton
+    class Display : public juce::Component, public juce::SettableTooltipClient
     {
     public:
-        explicit NoteView (TuneProcessor& p) : proc (p) {}
+        explicit Display (TuneProcessor& p) : proc (p) { hist.fill ({ 0, 0, -1, 0 }); }
         void paint (juce::Graphics&) override;
         void update();
     private:
+        void paintMeter (juce::Graphics&, juce::Rectangle<float>, float level, const juce::String& label);
+        void paintArc (juce::Graphics&, juce::Rectangle<float>);
+        void paintTrace (juce::Graphics&, juce::Rectangle<float>);
         TuneProcessor& proc;
-        bool voiced = false; int target = -1; float hz = 0, inDev = 0, outDev = 0;
-        int holdFrames = 0;
-    };
-
-    // o gráfico do ton: entrada (ámbar) e saída (vermello), coas notas da escala
-    class PitchGraph : public juce::Component
-    {
-    public:
-        explicit PitchGraph (TuneProcessor& p) : proc (p) { hist.fill ({ 0, 0, -1, 0 }); }
-        void paint (juce::Graphics&) override;
-        void drain();
-    private:
-        TuneProcessor& proc;
-        static constexpr int histSize = 800;
+        static constexpr int histSize = 520;
         std::array<TuneProcessor::Frame, histSize> hist;
         int head = 0;
-        float centre = 60.0f;
+        float centre = 60.0f, shown = 60.0f;
+        bool voiced = false; int target = -1; float hz = 0, inDev = 0, outDev = 0;
+        int hold = 0;
+        float inLv = 0, outLv = 0;
     };
 
-    // unha oitava de teclas: acesas as notas permitidas; pulsar cambia a escala
-    class ScaleKeys : public juce::Component, public juce::SettableTooltipClient
+    // o teclado: unha tira enriba de cada tecla di se a nota está na escala, fóra ou libre
+    class Keyboard : public juce::Component, public juce::TooltipClient
     {
     public:
-        explicit ScaleKeys (TuneProcessor& p) : proc (p) {}
+        explicit Keyboard (TuneProcessor& p) : proc (p) {}
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
-        void update();
+        void mouseMove (const juce::MouseEvent&) override;
+        void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+        juce::String getTooltip() override;
+        static constexpr int lo = 36, hi = 96;   // Do1 … Do6
+        static constexpr float stripH = 12.0f;
     private:
-        juce::Rectangle<float> keyRect (int pc) const;
+        int noteAt (juce::Point<float>) const;
+        juce::Rectangle<float> keyRect (int note) const;
         TuneProcessor& proc;
-        uint16_t mask = 0, held = 0; int target = -1; int mode = 0;
+        int hover = -1;
     };
 
-    struct Knob
+    struct Knob : public juce::Component
     {
-        juce::Label label;
-        juce::Slider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+        Knob();
+        void resized() override;
+        void paint (juce::Graphics&) override;
+        juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
+        juce::String name;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> att;
     };
 }
@@ -113,23 +101,23 @@ public:
 private:
     void timerCallback() override;
     void setupKnob (ui::Knob&, const char* id, const char* name, const char* tip);
-    void refreshModes();
+    void setupSegment (juce::TextButton* b, int count, const char* paramId, const char* const* names, const char* const* tips);
+    void refresh();
 
     TuneProcessor& proc;
     ui::Look look;
-    juce::TooltipWindow tooltips { this, 600 };
+    juce::TooltipWindow tooltips { this, 500 };
 
-    ui::NoteView noteView { proc };
-    ui::PitchGraph graph { proc };
-    ui::ScaleKeys keys { proc };
+    ui::Display display { proc };
+    ui::Keyboard keyboard { proc };
 
-    juce::ComboBox tonica, escala;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt;
-    juce::TextButton modeBtn[3];
+    juce::ComboBox tonica, escala, voz;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt, vozAtt;
+    juce::TextButton detect, link;
+    juce::TextButton modeBtn[3], calBtn[2];
 
-    ui::Knob vel, cant, hum, trans, la, mest, vol;
-
-    juce::Rectangle<int> secNote, secGraph, secScale, secMode, secCtl;
+    ui::Knob vel, transi, tol, tolT, vib, cant, form, trans, la, mest, vol;
+    float lastVel = -1, lastTransi = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TuneEditor)
 };

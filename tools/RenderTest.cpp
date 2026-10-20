@@ -94,7 +94,7 @@ static double measure (const float* x, int64_t len, int64_t c)
     return 69 + 12 * std::log2 (SR / tau / 440.0);
 }
 
-struct Stats { double inC = 0, outC = 0, maxC = 0; int frames = 0, wrong = 0; };
+struct Stats { double inC = 0, outC = 0, maxC = 0, signedC = 0; int frames = 0, wrong = 0; };
 
 // desafinación respecto da nota agardada (a da melodía + desprazamento)
 static Stats evaluate (const juce::AudioBuffer<float>& y, int lat, const std::vector<double>& truth, int shift)
@@ -117,9 +117,9 @@ static Stats evaluate (const juce::AudioBuffer<float>& y, int lat, const std::ve
         s.inC += std::abs (truth[(size_t) c] + shift - w) * 100;
         const double e = std::abs (mo - w) * 100;
         if (e > 50) { s.wrong++; continue; }
-        s.outC += e; s.maxC = std::max (s.maxC, e); s.frames++;
+        s.outC += e; s.maxC = std::max (s.maxC, e); s.signedC += (mo - w) * 100; s.frames++;
     }
-    if (s.frames > 0) { s.inC /= (s.frames + s.wrong); s.outC /= s.frames; }
+    if (s.frames > 0) { s.inC /= (s.frames + s.wrong); s.outC /= s.frames; s.signedC /= s.frames; }
     return s;
 }
 
@@ -255,64 +255,173 @@ int main (int argc, char** argv)
     auto check = [&] (const char* what, bool ok) { std::printf ("%-46s %s\n", what, ok ? "OK" : "FALLO"); fails += ok ? 0 : 1; };
     auto major = [] (TuneProcessor& p) { setP (p, "escala", 1); setP (p, "tonica", 0); };
 
-    // 1. robot en Do maior
-    auto robot = run (voice, 512, 2, [&] (TuneProcessor& p) { major (p); setP (p, "velocidade", 0); }, lat);
-    auto s = evaluate (robot, lat, truth, 0);
-    std::printf ("robot:   entrada %.1f c -> saída %.1f c (máx %.1f c), %d tramas, %d fóra de nota | latencia %d mostras (%.1f ms)\n",
-                 s.inC, s.outC, s.maxC, s.frames, s.wrong, lat, 1000.0 * lat / SR);
-    check ("robot: saída a menos de 6 cents de media", s.outC < 6.0 && s.wrong < s.frames / 50 + 2);
-
-    // 2. natural
-    auto nat = run (voice, 512, 2, [&] (TuneProcessor& p) { major (p); setP (p, "velocidade", 60); setP (p, "humanizar", 30); }, lat);
-    s = evaluate (nat, lat, truth, 0);
-    std::printf ("natural: entrada %.1f c -> saída %.1f c (máx %.1f c)\n", s.inC, s.outC, s.maxC);
-    check ("natural: corrixe (menos da metade da desafinación)", s.outC < 0.5 * s.inC);
-
-    // 3. transpor +5 (formantes por PSOLA)
-    auto tr = run (voice, 512, 2, [&] (TuneProcessor& p) { major (p); setP (p, "velocidade", 0); setP (p, "transpor", 5); }, lat);
-    s = evaluate (tr, lat, truth, 5);
-    std::printf ("+5 st:   saída %.1f c (máx %.1f c), %d fóra de nota\n", s.outC, s.maxC, s.wrong);
-    check ("transpor +5: notas certas", s.outC < 8.0 && s.wrong < s.frames / 50 + 2);
-
-    // 4. MIDI nota: unha terceira por riba da melodía
+    juce::AudioBuffer<float> robot, nat, tr;
+    for (int q = 0; q < 2; ++q)
     {
-        std::vector<std::pair<int, int>> ev;
-        double t = 0;
-        for (auto& nt : melody()) { const int n = (int) nt.midi + 4; ev.push_back ({ (int) (t * SR), n }); ev.push_back ({ (int) ((t + nt.dur) * SR) - 48, -n }); t += nt.dur; }
-        auto mid = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "modo", 2); setP (p, "velocidade", 0); }, lat, ev);
-        s = evaluate (mid, lat, truth, 4);
-        std::printf ("MIDI:    saída %.1f c (máx %.1f c), %d fóra de nota\n", s.outC, s.maxC, s.wrong);
-        check ("MIDI nota: segue o teclado", s.outC < 8.0 && s.wrong < s.frames / 20 + 2);
-    }
+        const char* qn = q == 0 ? "directo" : "estudio";
+        auto setq = [q] (TuneProcessor& p) { setP (p, "calidade", (float) q); };
+        std::printf ("---- %s\n", qn);
 
-    // 5. bloques de 37 e mono dan o mesmo
-    {
-        int l2 = 0, l3 = 0;
-        auto b37 = run (voice, 37, 2, [&] (TuneProcessor& p) { major (p); setP (p, "velocidade", 0); }, l2);
-        auto mono = run (voice, 512, 1, [&] (TuneProcessor& p) { major (p); setP (p, "velocidade", 0); }, l3);
-        float d1 = 0, d2 = 0;
-        for (int i = 0; i < robot.getNumSamples(); ++i)
+        // robot en Do maior
+        auto rb = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, lat);
+        auto s = evaluate (rb, lat, truth, 0);
+        std::printf ("robot:   entrada %.1f c -> saída %.1f c (máx %.1f c), %d tramas, %d fóra de nota | latencia %d mostras (%.2f ms)\n",
+                     s.inC, s.outC, s.maxC, s.frames, s.wrong, lat, 1000.0 * lat / SR);
+        check (q == 0 ? "directo robot: menos de 8 cents de media" : "estudio robot: menos de 3 cents de media",
+               s.outC < (q == 0 ? 8.0 : 3.0) && s.wrong < s.frames / 30 + 2);
+        if (q == 0) check ("directo: latencia de menos de 1 ms", lat < SR * 0.001);
+
+        // natural
+        auto nt = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 60); setP (p, "transicion", 120); }, lat);
+        s = evaluate (nt, lat, truth, 0);
+        std::printf ("natural: entrada %.1f c -> saída %.1f c (máx %.1f c)\n", s.inC, s.outC, s.maxC);
+        check ("natural: corrixe (menos da metade da desafinación)", s.outC < 0.5 * s.inC);
+
+        // vibrato 100 % con velocidade 0: as notas centradas e o vibrato intacto
         {
-            d1 = std::max (d1, std::abs (robot.getSample (0, i) - b37.getSample (0, i)));
-            d2 = std::max (d2, std::abs (robot.getSample (1, i) - mono.getSample (0, i)));
+            auto vb = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 100); }, lat);
+            auto sv = evaluate (vb, lat, truth, 0);
+            std::printf ("vibrato: saída %.1f c de media (con vibrato), centro %+.1f c\n", sv.outC, sv.signedC);
+            check ("vibrato 100 %: conserva o vibrato e centra a nota", sv.outC > 4.0 && std::abs (sv.signedC) < 3.0);
         }
-        std::printf ("diferenzas: bloques 37 %.2g, mono %.2g\n", d1, d2);
-        check ("bloques de 37 = bloques de 512", d1 < 1.0e-6f);
-        check ("mono = estéreo", d2 < 1.0e-6f);
+
+        // tolerancia 40 cents e notas libres: case non se toca
+        {
+            auto tl = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "tolerancia", 40); }, lat);
+            auto st = evaluate (tl, lat, truth, 0);
+            auto lb = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); for (int i = 0; i < 12; ++i) setP (p, ("libre" + juce::String (i)).toRawUTF8(), 1); }, lat);
+            auto sl = evaluate (lb, lat, truth, 0);
+            std::printf ("tolerancia 40 c: saída %.1f c | todas libres: saída %.1f c (entrada %.1f c)\n", st.outC, sl.outC, sl.inC);
+            check ("tolerancia e notas libres: deixan a voz", st.outC > 0.6 * st.inC && sl.outC > 0.85 * sl.inC);
+        }
+
+        // transpor +5
+        auto t5 = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "transpor", 5); }, lat);
+        s = evaluate (t5, lat, truth, 5);
+        std::printf ("+5 st:   saída %.1f c (máx %.1f c), %d fóra de nota\n", s.outC, s.maxC, s.wrong);
+        check ("transpor +5: notas certas", s.outC < 8.0 && s.wrong < s.frames / 30 + 2);
+
+        // MIDI nota: unha terceira por riba da melodía
+        {
+            std::vector<std::pair<int, int>> ev;
+            double t = 0;
+            for (auto& m : melody()) { const int n = (int) m.midi + 4; ev.push_back ({ (int) (t * SR), n }); ev.push_back ({ (int) ((t + m.dur) * SR) - 48, -n }); t += m.dur; }
+            auto mid = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "modo", 2); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, lat, ev);
+            s = evaluate (mid, lat, truth, 4);
+            std::printf ("MIDI:    saída %.1f c (máx %.1f c), %d fóra de nota\n", s.outC, s.maxC, s.wrong);
+            check ("MIDI nota: segue o teclado", s.outC < 8.0 && s.wrong < s.frames / 20 + 2);
+        }
+
+        // bloques de 37 e mono dan o mesmo
+        {
+            int l2 = 0, l3 = 0;
+            auto b37 = run (voice, 37, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, l2);
+            auto mono = run (voice, 512, 1, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, l3);
+            float d1 = 0, d2 = 0;
+            for (int i = 0; i < rb.getNumSamples(); ++i)
+            {
+                d1 = std::max (d1, std::abs (rb.getSample (0, i) - b37.getSample (0, i)));
+                d2 = std::max (d2, std::abs (rb.getSample (1, i) - mono.getSample (0, i)));
+            }
+            check ("bloques de 37 = bloques de 512", d1 < 1.0e-6f);
+            check ("mono = estéreo", d2 < 1.0e-6f);
+        }
+
+        // mestura 0 = voz orixinal atrasada a latencia
+        {
+            auto dry = run (voice, 256, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "mestura", 0); }, lat);
+            float d = 0;
+            for (int i = 0; i < (int) voice.size(); ++i) d = std::max (d, std::abs (dry.getSample (0, i + lat) - voice[(size_t) i]));
+            check ("mestura 0 = orixinal aliñada", d < 1.0e-6f);
+        }
+
+        // sen corrección: a voz pasa case igual (periodicidade e nivel)
+        {
+            auto c0 = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "cantidade", 0); }, lat);
+            double ein = 0, eout = 0;
+            for (size_t i = 0; i < voice.size(); ++i) { ein += voice[i] * voice[i]; eout += c0.getSample (0, (int) i + lat) * c0.getSample (0, (int) i + lat); }
+            const double db = 10 * std::log10 (eout / ein);
+            std::printf ("cantidade 0: nivel %+.2f dB\n", db);
+            check ("cantidade 0: mesmo nivel (±1 dB)", std::abs (db) < 1.0);
+        }
+        if (q == 0) { robot = rb; nat = nt; tr = t5; }
     }
 
-    // 6. mestura 0 = voz orixinal atrasada a latencia
+    // formantes (estudio): a nota non cambia e o timbre si
     {
-        auto dry = run (voice, 256, 2, [&] (TuneProcessor& p) { setP (p, "mestura", 0); }, lat);
-        float d = 0;
-        for (int i = 0; i < (int) voice.size(); ++i) d = std::max (d, std::abs (dry.getSample (0, i + lat) - voice[(size_t) i]));
-        check ("mestura 0 = orixinal aliñada", d < 1.0e-6f);
+        int l1 = 0, l2 = 0;
+        auto base = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, l1);
+        auto up = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "formantes", 4); }, l2);
+        auto s = evaluate (up, l2, truth, 0);
+        auto centroid = [] (const juce::AudioBuffer<float>& b)
+        {
+            const float* x = b.getReadPointer (0); double num = 0, den = 0, prev = 0;
+            for (int i = 1; i < b.getNumSamples(); ++i) { const double d = x[i] - x[i - 1]; num += d * d; den += (double) x[i] * x[i]; prev = d; }
+            (void) prev;
+            return std::sqrt (num / std::max (1e-12, den)) * SR / (2 * juce::MathConstants<double>::pi);
+        };
+        const double c0 = centroid (base), c1 = centroid (up);
+        std::printf ("formantes +4: saída %.1f c, brillo %.0f Hz -> %.0f Hz\n", s.outC, c0, c1);
+        check ("formantes +4: mesma nota e timbre máis brillante", s.outC < 4.0 && c1 > c0 * 1.12);
     }
 
-    // 7. estado
+    // rango: menos latencia en estudio con voz aguda
+    {
+        int lg = 0, la = 0;
+        run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); setP (p, "rango", 0); }, lg);
+        run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 1); setP (p, "rango", 5); }, la);
+        std::printf ("estudio: latencia baixo %.1f ms, soprano %.1f ms\n", 1000.0 * lg / SR, 1000.0 * la / SR);
+        check ("rango agudo: menos latencia", la < lg / 2);
+    }
+
+    // cambiar de xeito no medio: sen valores raros e a latencia nova chega ao DAW
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        p.prepareToPlay (SR, 512);
+        juce::AudioBuffer<float> buf (2, 512);
+        bool finite = true;
+        for (int blk = 0; blk < 200; ++blk)
+        {
+            if (blk == 60) setP (p, "calidade", 1);
+            if (blk == 120) setP (p, "rango", 2);
+            if (blk == 160) setP (p, "calidade", 0);
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) ((blk * 512 + i) % (int) voice.size())]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            for (int i = 0; i < 512; ++i) finite &= std::isfinite (buf.getSample (0, i));
+            if (blk == 100) { p.flushLatencyUpdate(); std::printf ("latencia en estudio: %d mostras\n", p.getLatencySamples()); finite &= p.getLatencySamples() > 1000; }
+        }
+        p.flushLatencyUpdate();
+        check ("cambio de xeito en marcha", finite && p.getLatencySamples() < 48);
+    }
+
+    // detectar a tonalidade: a melodía (Do maior) dúas veces
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        setP (p, "tonica", 5); setP (p, "escala", 2);   // empeza noutra cousa
+        p.prepareToPlay (SR, 512);
+        p.startKeyListening();
+        juce::AudioBuffer<float> buf (2, 512);
+        const int total = (int) voice.size() * 2;
+        bool done = false;
+        for (int pos = 0; pos + 512 <= total && ! done; pos += 512)
+        {
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) ((pos + i) % (int) voice.size())]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            done = p.finishKeyIfReady();
+        }
+        const uint16_t want = scales::rotate (scales::all()[1].mask, 0);
+        std::printf ("tonalidade: %s %s\n", scales::noteName ((int) p.params.getRawParameterValue ("tonica")->load()).toRawUTF8(),
+                     scales::all()[(size_t) p.params.getRawParameterValue ("escala")->load()].name);
+        check ("detectar tonalidade: Do maior (ou a súa relativa)", done && p.effectiveMask() == want);
+    }
+
+    // estado
     {
         TuneProcessor a;
         setP (a, "escala", 6); setP (a, "tonica", 9); setP (a, "velocidade", 123); setP (a, "modo", 1); setP (a, "transpor", -3);
+        setP (a, "calidade", 1); setP (a, "rango", 2); setP (a, "formantes", -2.5f);
         a.toggleScaleNote (1);
         juce::MemoryBlock mb; a.getStateInformation (mb);
         TuneProcessor b; b.setStateInformation (mb.getData(), (int) mb.getSize());
@@ -324,16 +433,16 @@ int main (int argc, char** argv)
         check ("estado gardado e recuperado", ok);
     }
 
-    // 8. silencio e ruído: nada raro
+    // silencio e ruído: nada raro (nos dous xeitos)
+    for (int q = 0; q < 2; ++q)
     {
         std::vector<float> noise (48000 * 2);
         std::mt19937 rng (3); std::uniform_real_distribution<float> u (-0.5f, 0.5f);
         for (size_t i = 24000; i < noise.size(); ++i) noise[i] = u (rng);
-        auto y = run (noise, 512, 2, [] (TuneProcessor&) {}, lat);
+        auto y = run (noise, 512, 2, [q] (TuneProcessor& p) { setP (p, "calidade", (float) q); setP (p, "transpor", 7); }, lat);
         float mx = 0; bool finite = true;
         for (int i = 0; i < y.getNumSamples(); ++i) { const float v = y.getSample (0, i); finite &= std::isfinite (v); mx = std::max (mx, std::abs (v)); }
-        std::printf ("ruído: pico %.2f\n", mx);
-        check ("silencio e ruído sen valores raros", finite && mx < 2.0f);
+        check (q == 0 ? "directo: silencio e ruído sen valores raros" : "estudio: silencio e ruído sen valores raros", finite && mx < 2.0f);
     }
 
     if (argc > 1)

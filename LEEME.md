@@ -1,4 +1,4 @@
-**Barullo Tune** é un corrector de afinación para voz: dende o efecto robot ata unha corrección natural que respecta o vibrato. Funciona en directo, con 34 ms de latencia, e non cambia os formantes, polo que a voz non soa a esquío ao movela.
+**Barullo Tune** é un afinador de voz en tempo real. En **Directo** non ten latencia (menos de 1 ms), para cantar escoitándote; en **Estudio** mantén o timbre aínda transpondo unha oitava e deixa mover os formantes. Vai dende unha corrección natural, que respecta o vibrato, ata o efecto robot.
 
 Unha ferramenta de [Escoita](https://www.escoita.link).
 
@@ -18,20 +18,22 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 
 ## Que ten
 
-- **Escala**: tónica e escala (cromática, maior, menor natural e harmónica, pentatónicas, blues, dórica, mixolidia) ou as notas que acendas a man nas teclas.
-- **Modos**:
-  - **Escala**: vai á nota permitida máis próxima.
-  - **MIDI: escala**: as notas que tocas no teclado fan de escala.
-  - **MIDI: nota**: a voz vai á nota exacta que tocas, na oitava máis próxima.
-- **Velocidade**: ao mínimo, efecto robot (salta de nota en seco). Entre 20 e 80 ms, corrección clara. Por riba, natural.
-- **Cantidade**, **humanizar** (as notas longas relaxan a corrección), **transpor** ±12 semitonos, **La** de referencia, **mestura** coa voz orixinal (aliñada no tempo) e **volume**.
-- **Pantalla**: a nota á que vai a voz, os hercios e os cents que corrixe, un medidor de −50 a +50 cents e o gráfico do ton da entrada e da saída.
+- **Pantalla**: a nota á que vai a voz, cun arco de −50 a +50 cents (agulla laranxa: a túa voz; branca: a afinada), os hercios e os cents que corrixe, os medidores de entrada e saída, e o ton dos últimos segundos.
+- **Teclado**: cinco oitavas, cunha tira enriba de cada tecla que di se a nota está **na escala**, **fóra** ou **libre** (cantando nela non se corrixe). Clic para poñer ou quitar; clic dereito para deixala libre. O que queda fóra do rango da voz vese máis escuro; a nota á que vai a voz acéndese.
+- **Tónica e escala** (cromática, maior, menores, pentatónicas, blues, dórica, mixolidia ou personalizada) e **Detectar**: canta uns segundos e escolle a tonalidade.
+- **Voz**: baixo, barítono, tenor, alto, mezzo, soprano ou calquera. O afinador só busca no seu rango (sen saltos de oitava).
+- **Modos**: escala, MIDI como escala (as notas que tocas fan de escala) e MIDI nota (a voz vai á nota que tocas).
+- **Afinar**: **velocidade** (canto tarda en afinar dentro da nota) e **transición** (canto tarda en pasar dunha nota á seguinte), que se poden **ligar**.
+- **Tolerancia**: desafinacións menores ca uns cents, ou máis curtas ca un tempo, non se tocan.
+- **Voz**: **vibrato** de 0 a 200 % (o vibrato mantense aínda corrixindo rápido), **cantidade** de corrección e **formantes** (en Estudio).
+- **Saída**: transpor ±12 semitonos, La de referencia (415–466 Hz), mestura coa voz orixinal (aliñada) e volume.
+- **Efecto robot**: velocidade e transición a 0 e vibrato a 0 %.
 
 ## Como funciona
 
 | Ficheiro | Que é |
 |---|---|
-| `Source/tune/Engine.h` | O motor: detector de ton tipo YIN sobre a sinal diezmada a ~12 kHz, cada 4 ms, con continuidade (non salta de oitava no medio dunha nota) e confirmación ao comezar. TD-PSOLA en tempo real: marcas de ciclo aliñadas por correlación con precisión de fracción de mostra, e cada grano corrixido co seu propio período. |
+| `Source/tune/Engine.h` | O motor. Detector de ton tipo YIN (sinal diezmada a ~12 kHz, cada 4 ms), con continuidade e confirmación ao comezar. Marcas de ciclo aliñadas por correlación, con precisión de fracción de mostra. **Directo**: a voz lese a outra velocidade e salta un ciclo enteiro cando se adianta ou se atrasa (fundido de 0,75 ms; latencia 0,9 ms); o ton mídese ciclo a ciclo e extrapólase ao punto que se le. **Estudio**: TD-PSOLA en tempo real, cada grano corrixido co seu propio período, e formantes lendo o grano a outra velocidade. Modelo de corrección común: o vibrato sepárase cun filtro de banda (3–8 Hz); o centro vai á nota con «velocidade», a nota de destino móvese con «transición» e o vibrato volve sumarse. |
 | `Source/Plugin*.cpp` | O plugin JUCE e a interface |
 | `tools/RenderTest.cpp` | Proba sen interface; con `--file entrada.wav saida.wav parámetro=valor…` procesa un ficheiro |
 | `tools/analise.py` | Mide a afinación dunha voz antes e despois (YIN, vibrato, centro das notas, gráfico) |
@@ -40,11 +42,11 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 
 ## Probas
 
-- **Voz sintética desafinada** (unha media de 32 cents, con vibrato, glisandos e consoantes): en modo robot, a saída queda a 0,0 cents de media. Transpor +5 e o modo MIDI caen na nota.
-- **Voces reais** (vocadito, NIT, Essentia), en modo robot: a distancia á nota pasa de 22–27 cents a 1–4 cents.
-- **Transparencia**: coa corrección a 0 %, a voz sae practicamente igual (periodicidade 0,951 → 0,947).
-- **Bloques** de 37 e de 512 mostras, mono e estéreo: mesmo resultado.
-- **Mestura 0 %** = voz orixinal atrasada exactamente a latencia.
+- **Voz sintética desafinada** (32 cents de media, con vibrato, glisandos e consoantes), efecto robot: 0,8 cents en Directo e 0,2 en Estudio. Transpor +5, MIDI e formantes caen na nota; vibrato ao 100 %: notas centradas (±0,3 c) e vibrato intacto; tolerancia e notas libres deixan a voz.
+- **Voces reais** (vocadito, NIT, Essentia), efecto robot: o centro das notas pasa de 21–26 cents a 1–9 cents.
+- **Transparencia**: coa corrección a 0 % a voz sae igual (mesmo nivel e periodicidade).
+- **Bloques** de 37 e de 512 mostras, mono e estéreo: mesmo resultado. **Mestura 0 %** = voz orixinal atrasada exactamente a latencia.
+- **Cambiar de xeito** en marcha: a latencia nova chega ao DAW. **Detectar tonalidade**: Do maior na melodía de proba.
 - **Estado** gardado e recuperado. Silencio e ruído sen valores raros.
 - **pluginval** ao nivel máximo (10), con probas de interface; auval no Mac.
 

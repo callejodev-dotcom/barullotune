@@ -20,20 +20,39 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "escala", 1 }, U ("Escala"), sc, 1));
     for (int i = 0; i < 12; ++i)
         l.add (std::make_unique<AudioParameterBool> (ParameterID { "nota" + String (i), 1 }, U ("Nota ") + scales::noteName (i), true));
+    for (int i = 0; i < 12; ++i)
+        l.add (std::make_unique<AudioParameterBool> (ParameterID { "libre" + String (i), 1 }, U ("Libre ") + scales::noteName (i), false));
 
-    auto msFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("robot") : String (roundToInt (v)) + " ms"; });
+    auto msFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("0 ms") : String (roundToInt (v)) + " ms"; });
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "velocidade", 1 }, U ("Velocidade"),
-                                                  NormalisableRange<float> (0.0f, 400.0f, 0.0f, 0.4f), 25.0f, msFmt));
+                                                  NormalisableRange<float> (0.0f, 800.0f, 0.0f, 0.3f), 20.0f, msFmt));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "transicion", 1 }, U ("Transición"),
+                                                  NormalisableRange<float> (0.0f, 800.0f, 0.0f, 0.3f), 40.0f, msFmt));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { "ligar", 1 }, U ("Ligar velocidade e transición"), false,
+                                                 AudioParameterBoolAttributes().withAutomatable (false)));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "tolerancia", 1 }, U ("Tolerancia"), NormalisableRange<float> (0.0f, 40.0f, 0.1f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " c"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "toltempo", 1 }, U ("Tolerancia (tempo)"), NormalisableRange<float> (0.0f, 300.0f, 0.0f, 0.5f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " ms"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibrato", 1 }, U ("Vibrato"), NormalisableRange<float> (0.0f, 200.0f), 100.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })));
     auto pct = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; });
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "cantidade", 1 }, U ("Cantidade"), NormalisableRange<float> (0.0f, 100.0f), 100.0f, pct));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "humanizar", 1 }, U ("Humanizar"), NormalisableRange<float> (0.0f, 100.0f), 0.0f, pct));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "transpor", 1 }, U ("Transpor"), -12, 12, 0,
         AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return (v > 0 ? "+" : "") + String (v) + " st"; })));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "la", 1 }, U ("La"), NormalisableRange<float> (430.0f, 450.0f, 0.1f), 440.0f,
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "la", 1 }, U ("La"), NormalisableRange<float> (415.3f, 466.2f, 0.1f), 440.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " Hz"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "mestura", 1 }, U ("Mestura"), NormalisableRange<float> (0.0f, 100.0f), 100.0f, pct));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, U ("Volume"), NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; })));
+    // cambian a latencia: non se automatizan
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "calidade", 1 }, U ("Xeito"), StringArray { U ("Directo"), U ("Estudio") }, 0,
+        AudioParameterChoiceAttributes().withAutomatable (false)));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "rango", 1 }, U ("Voz"),
+        StringArray { U ("Baixo"), U ("Barítono"), U ("Tenor"), U ("Alto"), U ("Mezzo"), U ("Soprano"), U ("Calquera") }, 6,
+        AudioParameterChoiceAttributes().withAutomatable (false)));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "formantes", 1 }, U ("Formantes"), NormalisableRange<float> (-7.0f, 7.0f, 0.1f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.05f ? String ("0") : (v > 0 ? "+" : "") + String (v, 1); })));
     return l;
 }
 
@@ -48,15 +67,57 @@ TuneProcessor::TuneProcessor()
     pEscala = params.getRawParameterValue ("escala");
     pVel = params.getRawParameterValue ("velocidade");
     pCant = params.getRawParameterValue ("cantidade");
-    pHum = params.getRawParameterValue ("humanizar");
+    pTransicion = params.getRawParameterValue ("transicion");
+    pTol = params.getRawParameterValue ("tolerancia");
+    pTolT = params.getRawParameterValue ("toltempo");
+    pVib = params.getRawParameterValue ("vibrato");
     pTrans = params.getRawParameterValue ("transpor");
     pLa = params.getRawParameterValue ("la");
     pMest = params.getRawParameterValue ("mestura");
     pVol = params.getRawParameterValue ("volume");
+    pCal = params.getRawParameterValue ("calidade");
+    pRango = params.getRawParameterValue ("rango");
+    pForm = params.getRawParameterValue ("formantes");
     for (int i = 0; i < 12; ++i) pNota[(size_t) i] = params.getRawParameterValue ("nota" + juce::String (i));
+    for (int i = 0; i < 12; ++i) pLibre[(size_t) i] = params.getRawParameterValue ("libre" + juce::String (i));
+    for (auto& h : keyHist) h = 0;
 
     engine.prepare (44100.0);
-    setLatencySamples (engine.latency());
+    applyEngineSettings();
+    setLatencySamples (latencyNow.load());
+}
+
+// xeito e rango cambian a latencia: o motor volve empezar e avísase ao DAW
+void TuneProcessor::applyEngineSettings()
+{
+    const int q = juce::jlimit (0, 1, (int) pCal->load()), r = juce::jlimit (0, (int) tune::Engine::numRanges - 1, (int) pRango->load());
+    if (q != engine.currentQuality() || r != engine.currentRange() || latencyNow.load() != engine.latency())
+    {
+        engine.configure (q, r);
+        latencyNow = engine.latency();
+        triggerAsyncUpdate();
+    }
+}
+
+void TuneProcessor::handleAsyncUpdate() { setLatencySamples (latencyNow.load()); }
+
+void TuneProcessor::startKeyListening()
+{
+    for (auto& h : keyHist) h = 0;
+    keyHeard = 0;
+    keyListening = true;
+}
+
+bool TuneProcessor::finishKeyIfReady()
+{
+    if (! keyListening.load() || keyHeard.load() < keyListenSeconds) return false;
+    float h[12];
+    for (int i = 0; i < 12; ++i) h[i] = keyHist[(size_t) i].load();
+    const auto k = scales::detectKey (h);
+    setParamPlain ("tonica", (float) k.first);
+    setParamPlain ("escala", (float) k.second);
+    keyListening = false;
+    return true;
 }
 
 bool TuneProcessor::isBusesLayoutSupported (const BusesLayout& l) const
@@ -69,8 +130,13 @@ bool TuneProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 void TuneProcessor::prepareToPlay (double sr, int)
 {
     engine.prepare (sr);
-    setLatencySamples (engine.latency());
-    dryDelay.assign ((size_t) juce::jmax (1, engine.latency()), 0.0f);   // atraso = latencia exacta
+    latencyNow = -1;
+    applyEngineSettings();
+    cancelPendingUpdate();
+    setLatencySamples (latencyNow.load());
+    // a voz seca vai atrasada o mesmo cá corrixida (o máximo posible: estudio, voz grave)
+    const int maxLat = (int) std::ceil (2.5 * (std::ceil (sr / 60.0) + 2)) + 64;
+    dry.assign ((size_t) maxLat + 1, 0.0f);
     dryPos = 0;
     mixSm.reset (sr, 0.03); mixSm.setCurrentAndTargetValue (pMest->load() * 0.01f);
     gainSm.reset (sr, 0.03); gainSm.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVol->load()));
@@ -87,14 +153,12 @@ uint16_t TuneProcessor::effectiveMask() const
         for (int i = 0; i < 12; ++i) if (pNota[(size_t) i]->load() > 0.5f) m |= (uint16_t) (1u << i);
         return m;
     }
-    const int key = juce::jlimit (0, 11, (int) pTonica->load());
-    const uint16_t rel = scales::all()[(size_t) sc].mask;
-    return (uint16_t) (((rel << key) | (rel >> (12 - key))) & 0x0FFF);
+    return scales::rotate (scales::all()[(size_t) sc].mask, (int) pTonica->load());
 }
 
-static void setParam (juce::AudioProcessorValueTreeState& p, const juce::String& id, float plain)
+void TuneProcessor::setParamPlain (const juce::String& id, float plain)
 {
-    if (auto* r = p.getParameter (id))
+    if (auto* r = params.getParameter (id))
     {
         r->beginChangeGesture();
         r->setValueNotifyingHost (r->convertTo0to1 (plain));
@@ -102,21 +166,30 @@ static void setParam (juce::AudioProcessorValueTreeState& p, const juce::String&
     }
 }
 
+uint16_t TuneProcessor::freeMask() const
+{
+    uint16_t m = 0;
+    for (int i = 0; i < 12; ++i) if (pLibre[(size_t) i]->load() > 0.5f) m |= (uint16_t) (1u << i);
+    return m;
+}
+
+void TuneProcessor::toggleFreeNote (int pc)
+{
+    pc = ((pc % 12) + 12) % 12;
+    const bool on = (freeMask() >> pc) & 1;
+    setParamPlain ("libre" + juce::String (pc), on ? 0.0f : 1.0f);
+}
+
 void TuneProcessor::toggleScaleNote (int pc)
 {
     const uint16_t m = effectiveMask();
     if ((int) pEscala->load() != scales::custom)
     {
-        for (int i = 0; i < 12; ++i) setParam (params, "nota" + juce::String (i), ((m >> i) & 1) ? 1.0f : 0.0f);
-        setParam (params, "escala", (float) scales::custom);
+        for (int i = 0; i < 12; ++i) setParamPlain ("nota" + juce::String (i), ((m >> i) & 1) ? 1.0f : 0.0f);
+        setParamPlain ("escala", (float) scales::custom);
     }
     const bool on = (m >> pc) & 1;
-    setParam (params, "nota" + juce::String (pc), on ? 0.0f : 1.0f);
-}
-
-void TuneProcessor::setScalePreset (int index)
-{
-    setParam (params, "escala", (float) juce::jlimit (0, scales::custom, index));
+    setParamPlain ("nota" + juce::String (pc), on ? 0.0f : 1.0f);
 }
 
 void TuneProcessor::pushFrame()
@@ -130,6 +203,14 @@ void TuneProcessor::pushFrame()
     f.target = (int16_t) engine.targetNote();
     f.voiced = engine.voiced ? 1 : 0;
     fifo.finishedWrite (1);
+
+    if (keyListening.load() && engine.voiced && engine.clarity() > 0.75)
+    {
+        const float dt = 256.0f / (float) getSampleRate();
+        const int pc = ((int) std::lround (engine.inputMidi) % 12 + 12) % 12;
+        keyHist[(size_t) pc] = keyHist[(size_t) pc].load() + dt;
+        keyHeard = keyHeard.load() + dt;
+    }
 }
 
 void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -138,12 +219,18 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     const int numCh = buffer.getNumChannels(), numIn = juce::jmin (numCh, getTotalNumInputChannels());
     const int n = buffer.getNumSamples();
 
+    applyEngineSettings();
     engine.mode = juce::jlimit (0, 2, (int) pModo->load());
+    engine.formant = pForm->load();
     engine.key = 0;
     engine.scale = effectiveMask();
     engine.speedMs = pVel->load();
     engine.amount = pCant->load() * 0.01;
-    engine.humanize = pHum->load() * 0.01;
+    engine.transitionMs = pTransicion->load();
+    engine.tolCents = pTol->load();
+    engine.tolMs = pTolT->load();
+    engine.vibrato = pVib->load() * 0.01;
+    engine.freeMask = freeMask();
     engine.transpose = std::round (pTrans->load());
     engine.refA = pLa->load();
     mixSm.setTargetValue (pMest->load() * 0.01f);
@@ -151,7 +238,7 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     auto it = midi.cbegin();
     const auto end = midi.cend();
-    const int dsz = (int) dryDelay.size();
+    const int dsz = (int) dry.size(), lat = juce::jmin (dsz - 1, engine.latency());
 
     for (int i = 0; i < n; ++i)
     {
@@ -168,15 +255,17 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
         if (! std::isfinite (x)) x = 0;
 
         const float wet = engine.process (x);
-        const float dry = dryDelay[(size_t) dryPos];
-        dryDelay[(size_t) dryPos] = x;
+        dry[(size_t) dryPos] = x;
+        int rd = dryPos - lat; if (rd < 0) rd += dsz;
+        const float dx = dry[(size_t) rd];
         if (++dryPos >= dsz) dryPos = 0;
 
         const float mix = mixSm.getNextValue(), g = gainSm.getNextValue();
-        const float y = (dry + (wet - dry) * mix) * g;
+        const float y = (dx + (wet - dx) * mix) * g;
         for (int c = 0; c < numCh; ++c) buffer.getWritePointer (c)[i] = y;
 
         levelAcc = juce::jmax (levelAcc * 0.9995f, std::abs (x));
+        outAcc = juce::jmax (outAcc * 0.9995f, std::abs (y));
         if (++frameCount >= 256) { frameCount = 0; pushFrame(); }
     }
     for (; it != end; ++it)
@@ -191,6 +280,7 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     nowTarget = engine.targetNote(); nowVoiced = engine.voiced;
     nowHeld = engine.heldPitchClasses();
     inLevel = levelAcc;
+    outLevel = outAcc;
 }
 
 void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)

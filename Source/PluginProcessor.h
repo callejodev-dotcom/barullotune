@@ -32,13 +32,43 @@ namespace scales
     }
     // nome con oitava (Do central = Do3, coma nos outros Barullos)
     inline juce::String noteWithOctave (int midi) { return noteName (midi) + juce::String (midi / 12 - 2); }
+    inline uint16_t rotate (uint16_t rel, int key) { key = ((key % 12) + 12) % 12; return (uint16_t) (((rel << key) | (rel >> (12 - key))) & 0x0FFF); }
+
+    // tonalidade a partir dun histograma de clases de altura (perfís de Krumhansl–Kessler).
+    // Devolve tónica (0–11) e escala (1 = maior, 2 = menor natural).
+    inline std::pair<int, int> detectKey (const float* hist)
+    {
+        static const double maj[12] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
+        static const double mnr[12] = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
+        auto corr = [&] (const double* prof, int k)
+        {
+            double mx = 0, my = 0;
+            for (int i = 0; i < 12; ++i) { mx += hist[(i + k) % 12]; my += prof[i]; }
+            mx /= 12; my /= 12;
+            double sxy = 0, sxx = 0, syy = 0;
+            for (int i = 0; i < 12; ++i)
+            {
+                const double a = hist[(i + k) % 12] - mx, b = prof[i] - my;
+                sxy += a * b; sxx += a * a; syy += b * b;
+            }
+            return sxy / std::sqrt (sxx * syy + 1e-12);
+        };
+        int bk = 0, bs = 1; double best = -2;
+        for (int k = 0; k < 12; ++k)
+        {
+            const double a = corr (maj, k), b = corr (mnr, k);
+            if (a > best) { best = a; bk = k; bs = 1; }
+            if (b > best) { best = b; bk = k; bs = 2; }
+        }
+        return { bk, bs };
+    }
 }
 
-class TuneProcessor : public juce::AudioProcessor
+class TuneProcessor : public juce::AudioProcessor, private juce::AsyncUpdater
 {
 public:
     TuneProcessor();
-    ~TuneProcessor() override = default;
+    ~TuneProcessor() override { cancelPendingUpdate(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -69,7 +99,22 @@ public:
     uint16_t effectiveMask() const;
     // a interface pulsa unha tecla da escala: pasa a «Personalizada» se fai falta
     void toggleScaleNote (int pc);
-    void setScalePreset (int index);
+    // notas libres: a voz pode ir a elas e non se corrixe
+    uint16_t freeMask() const;
+    void toggleFreeNote (int pc);
+    void setParamPlain (const juce::String& id, float plain);
+
+    // detectar a tonalidade escoitando a voz uns segundos
+    static constexpr float keyListenSeconds = 8.0f;
+    void startKeyListening();
+    void stopKeyListening() { keyListening = false; }
+    bool isKeyListening() const { return keyListening.load(); }
+    float keyProgress() const { return juce::jlimit (0.0f, 1.0f, keyHeard.load() / keyListenSeconds); }
+    bool finishKeyIfReady();   // fío da interface: aplica a tonalidade cando xa escoitou abondo
+    void flushLatencyUpdate() { handleUpdateNowIfNeeded(); }   // para as probas
+
+    // latencia actual en ms (para amosala)
+    float latencyMs() const { return (float) (1000.0 * latencyNow.load() / juce::jmax (1.0, getSampleRate())); }
 
     // para a interface: historia do ton (unha trama cada 256 mostras)
     struct Frame { float inMidi, outMidi; int16_t target; uint8_t voiced; };
@@ -79,21 +124,29 @@ public:
     std::atomic<float> nowIn { 0 }, nowOut { 0 }, nowHz { 0 }, nowCents { 0 };
     std::atomic<int> nowTarget { -1 }, nowHeld { 0 };
     std::atomic<bool> nowVoiced { false };
-    std::atomic<float> inLevel { 0 };
+    std::atomic<float> inLevel { 0 }, outLevel { 0 };
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
     void pushFrame();
+    void handleAsyncUpdate() override;
+    void applyEngineSettings();
 
     tune::Engine engine;
-    std::vector<float> dryDelay;
+    std::vector<float> dry;
     int dryPos = 0;
     juce::SmoothedValue<float> mixSm, gainSm;
     int frameCount = 0;
-    float levelAcc = 0;
+    float levelAcc = 0, outAcc = 0;
+    std::atomic<int> latencyNow { 0 };
 
-    std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pHum, *pTrans, *pLa, *pMest, *pVol;
-    std::array<std::atomic<float>*, 12> pNota {};
+    std::atomic<bool> keyListening { false };
+    std::atomic<float> keyHeard { 0 };
+    std::array<std::atomic<float>, 12> keyHist {};
+
+    std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm;
+    std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib;
+    std::array<std::atomic<float>*, 12> pNota {}, pLibre {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TuneProcessor)
 };

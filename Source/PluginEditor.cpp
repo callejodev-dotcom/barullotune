@@ -84,6 +84,7 @@ void Look::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce:
     }
     g.setColour (col::lina);
     g.strokePath (shape, juce::PathStrokeType (1.0f));
+    if (b.hasKeyboardFocus (false)) { g.setColour (col::sodio); g.strokePath (shape, juce::PathStrokeType (1.6f)); }
 }
 
 void Look::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool over, bool)
@@ -114,6 +115,11 @@ void Look::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, floa
         g.setColour (s.isEnabled() ? col::sodio : col::neboa.withAlpha (0.4f));
         g.strokePath (val, juce::PathStrokeType (3.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
+    if (s.hasKeyboardFocus (false))   // co foco do teclado: un aro de sodio
+    {
+        g.setColour (col::sodio.withAlpha (0.6f));
+        g.drawEllipse (c.x - rad - 3.0f, c.y - rad - 3.0f, (rad + 3.0f) * 2.0f, (rad + 3.0f) * 2.0f, 1.2f);
+    }
     const juce::Point<float> tip (c.x + (rad - 9.0f) * std::sin (ang), c.y - (rad - 9.0f) * std::cos (ang));
     g.setColour (s.isEnabled() ? col::escuma : col::neboa);
     g.fillEllipse (tip.x - 2.5f, tip.y - 2.5f, 5.0f, 5.0f);
@@ -134,7 +140,7 @@ void Look::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, floa
         g.setColour ((s.isEnabled() ? col::sodio : col::neboa).withAlpha (0.55f));
         g.fillRoundedRectangle (juce::Rectangle<float> (a, r.getY(), b - a, r.getHeight()), 3.0f);
     }
-    g.setColour (col::lina); g.drawRoundedRectangle (r, 4.0f, 1.0f);
+    g.setColour (s.hasKeyboardFocus (false) ? col::sodio : col::lina); g.drawRoundedRectangle (r, 4.0f, s.hasKeyboardFocus (false) ? 1.6f : 1.0f);
     g.setColour (s.isEnabled() ? col::escuma : col::neboa);
     g.setFont (semi (13.5f));
     g.drawText (s.getTextFromValue (s.getValue()).replaceCharacter ('.', ','), r.toNearestInt(), juce::Justification::centred, false);
@@ -172,7 +178,7 @@ void Look::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, i
 {
     auto r = juce::Rectangle<int> (w, h).toFloat().reduced (0.5f);
     g.setColour (box.isMouseOver (true) ? col::carril.brighter (0.15f) : col::fondo2); g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (col::lina); g.drawRoundedRectangle (r, 5.0f, 1.0f);
+    g.setColour (box.hasKeyboardFocus (true) ? col::sodio : col::lina); g.drawRoundedRectangle (r, 5.0f, box.hasKeyboardFocus (true) ? 1.6f : 1.0f);
     const float ax = (float) w - 16.0f, ay = (float) h * 0.5f;
     juce::Path p; p.startNewSubPath (ax - 4.5f, ay - 2.0f); p.lineTo (ax, ay + 2.5f); p.lineTo (ax + 4.5f, ay - 2.0f);
     g.setColour (col::neboa); g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
@@ -217,6 +223,17 @@ void Display::update()
         outDev = (proc.nowOut.load() - (float) target) * 100.0f;
     }
     else if (hold > 0 && --hold == 0) voiced = false;
+
+    // para os lectores de pantalla: a nota e a corrección (só cando cambian de verdade)
+    {
+        const int t = voiced ? target : -1, cc = voiced ? juce::roundToInt ((outDev - inDev) / 5.0f) * 5 : 0;
+        if (t != spokenTarget || cc != spokenCents)
+        {
+            spokenTarget = t; spokenCents = cc;
+            setTitle (t < 0 ? U ("Afinador: sen voz") : U ("Afinador: ") + scales::noteWithOctave (t) + U (", corrixe ") + juce::String (cc) + " cents");
+            if (auto* h = getAccessibilityHandler()) h->notifyAccessibilityEvent (juce::AccessibilityEvent::titleChanged);
+        }
+    }
 
     auto toLv = [] (float peak) { return juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (peak, -60.0f) + 48.0f) / 48.0f); };
     inLv = juce::jmax (toLv (proc.inLevel.load()), inLv * 0.88f);
@@ -442,6 +459,11 @@ void Keyboard::paint (juce::Graphics& g)
                 g.setColour (col::sodio);
                 g.fillEllipse (k.getCentreX() - 4.0f, k.getBottom() - (black ? 14.0f : 30.0f), 8.0f, 8.0f);
             }
+            if (n == focusNote && hasKeyboardFocus (false))
+            {
+                g.setColour (col::sodio);
+                g.drawRoundedRectangle (k.expanded (black ? 0.0f : -1.0f), 3.0f, 2.0f);
+            }
             if (! black && pc == 0)
             {
                 g.setFont (semi (12.0f));
@@ -484,6 +506,55 @@ void Keyboard::mouseDrag (const juce::MouseEvent& e)
     repaint();
 }
 
+juce::String Keyboard::describe (int note) const
+{
+    const int pc = ((note % 12) + 12) % 12;
+    const bool inScale = (proc.effectiveMask() >> pc) & 1, free = (proc.freeMask() >> pc) & 1;
+    juce::String d = scales::noteWithOctave (note) + (free ? U (": libre") : inScale ? U (": na escala") : U (": fóra da escala"));
+    if (customTuning())
+    {
+        const float c = proc.params.getRawParameterValue ("cents" + juce::String (pc))->load();
+        d << ", " << (c > 0 ? "+" : "") << juce::String (c, 1) << " cents";
+    }
+    return d;
+}
+
+void Keyboard::announce()
+{
+    if (focusNote < 0) return;
+    setTitle (U ("Teclado da escala. ") + describe (focusNote));
+    if (auto* h = getAccessibilityHandler()) h->notifyAccessibilityEvent (juce::AccessibilityEvent::titleChanged);
+}
+
+// sen rato: frechas para moverse (arriba e abaixo, unha oitava), espazo ou intro para
+// poñer ou quitar a nota da escala, F para deixala libre; coa afinación Personalizada,
+// maiúsculas + arriba/abaixo cambia os cents da nota (de 1 en 1)
+bool Keyboard::keyPressed (const juce::KeyPress& k)
+{
+    if (focusNote < 0) focusNote = 60;
+    const int code = k.getKeyCode();
+    const bool shift = k.getModifiers().isShiftDown();
+    if (shift && customTuning() && (code == juce::KeyPress::upKey || code == juce::KeyPress::downKey))
+    {
+        const int pc = focusNote % 12;
+        if (auto* prm = proc.params.getParameter ("cents" + juce::String (pc)))
+        {
+            const float c = juce::jlimit (-50.0f, 50.0f, prm->convertFrom0to1 (prm->getValue()) + (code == juce::KeyPress::upKey ? 1.0f : -1.0f));
+            prm->beginChangeGesture(); prm->setValueNotifyingHost (prm->convertTo0to1 (c)); prm->endChangeGesture();
+        }
+    }
+    else if (code == juce::KeyPress::leftKey) focusNote = juce::jmax (lo, focusNote - 1);
+    else if (code == juce::KeyPress::rightKey) focusNote = juce::jmin (hi, focusNote + 1);
+    else if (code == juce::KeyPress::upKey) focusNote = juce::jmin (hi, focusNote + 12);
+    else if (code == juce::KeyPress::downKey) focusNote = juce::jmax (lo, focusNote - 12);
+    else if (code == juce::KeyPress::spaceKey || code == juce::KeyPress::returnKey) proc.toggleScaleNote (focusNote % 12);
+    else if (k.getTextCharacter() == 'f' || k.getTextCharacter() == 'F') proc.toggleFreeNote (focusNote);
+    else return false;
+    announce();
+    repaint();
+    return true;
+}
+
 juce::String Keyboard::getTooltip()
 {
     if (hover < 0) return {};
@@ -505,6 +576,65 @@ Knob::Knob()
     slider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
     slider.setMouseDragSensitivity (220);
     addAndMakeVisible (slider);
+}
+
+// ---- escribir o valor e mover fino
+void ValueSlider::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || e.mods.isCommandDown() || e.mods.isCtrlDown()) { showEditor(); return; }
+    normalSensitivity = getMouseDragSensitivity();
+    if (e.mods.isShiftDown()) setMouseDragSensitivity (normalSensitivity * 5);   // fino
+    juce::Slider::mouseDown (e);
+}
+
+void ValueSlider::mouseUp (const juce::MouseEvent& e)
+{
+    juce::Slider::mouseUp (e);
+    setMouseDragSensitivity (normalSensitivity);
+}
+
+bool ValueSlider::keyPressed (const juce::KeyPress& k)
+{
+    if (k.getKeyCode() == juce::KeyPress::returnKey) { showEditor(); return true; }   // intro: escribir o valor
+    return juce::Slider::keyPressed (k);
+}
+
+void ValueSlider::showEditor()
+{
+    if (param == nullptr || getParentComponent() == nullptr) return;
+    editor = std::make_unique<juce::TextEditor>();
+    editor->setJustification (juce::Justification::centred);
+    editor->setFont (semi (15.0f));
+    editor->setText (param->getCurrentValueAsText(), false);
+    editor->selectAll();
+    editor->setTitle (getTitle() + U (": escribir o valor"));
+    auto* parent = getParentComponent();
+    editor->setBounds (getBounds().withSizeKeepingCentre (juce::jmax (70, getWidth()), 24));
+    parent->addAndMakeVisible (*editor);
+    editor->grabKeyboardFocus();
+    auto finish = [this] (bool apply)
+    {
+        if (editor == nullptr) return;
+        const auto text = editor->getText();
+        juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<ValueSlider> (this), text, apply]
+        {
+            if (sp == nullptr) return;
+            if (apply) sp->applyText (text);
+            sp->editor.reset();
+            sp->grabKeyboardFocus();
+        });
+    };
+    editor->onReturnKey = [finish] { finish (true); };
+    editor->onEscapeKey = [finish] { finish (false); };
+    editor->onFocusLost = [finish] { finish (true); };
+}
+
+bool ValueSlider::applyText (const juce::String& text)
+{
+    if (param == nullptr || text.trim().isEmpty()) return false;
+    auto t = text.trim().replaceCharacter (',', '.').replace (juce::String::fromUTF8 ("−"), "-");
+    setValue (param->convertFrom0to1 (param->getValueForText (t)), juce::sendNotificationSync);
+    return true;
 }
 
 void Knob::resized() { slider.setBounds (getLocalBounds().withTrimmedBottom (24).withSizeKeepingCentre (66, 66)); }
@@ -564,6 +694,11 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     canvas.painter = [this] (juce::Graphics& g) { paintCanvas (g); };
     canvas.addAndMakeVisible (display);
     canvas.addAndMakeVisible (keyboard);
+    // accesibilidade: o tabulador percorre os controis; cada un co seu nome
+    canvas.setFocusContainerType (juce::Component::FocusContainerType::keyboardFocusContainer);
+    canvas.setTitle ("Barullo Tune");
+    display.setTitle (U ("Afinador"));
+    preset.setTitle ("Presets"); undoBtn.setTitle (U ("Desfacer")); redoBtn.setTitle (U ("Refacer"));
     display.setTooltip (U ("Á esquerda, a nota á que vai a voz: a agulla laranxa é a túa voz e a branca a afinada (en cents). "
                            "Á dereita, o ton nos últimos segundos."));
 
@@ -693,7 +828,10 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
         hInt[h].setTooltip (U ("Intervalo desta armonía respecto da túa voz."));
         comboAtts.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, id + "_intervalo", hInt[h]));
         canvas.addAndMakeVisible (hInt[h]);
-        for (int b = 0; b < 5; ++b) setupBar (hBar[h][b], (id + bars[b]).toRawUTF8(), U (barTips[b]));
+        static const char* barNames[5] = { "nivel", "panorama", "desafinar", "atraso", "formantes" };
+        for (int b = 0; b < 5; ++b) setupBar (hBar[h][b], (id + bars[b]).toRawUTF8(), U (barTips[b]), U ("Armonía ") + juce::String (h + 1) + ": " + barNames[b]);
+        hOn[h].setTitle (U ("Armonía ") + juce::String (h + 1));
+        hInt[h].setTitle (U ("Armonía ") + juce::String (h + 1) + ": intervalo");
         hBar[h][0].getProperties().set ("fromMin", true);   // o nivel énchese desde a esquerda
     }
 
@@ -724,6 +862,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     voz.setTooltip (U ("Tipo de voz: o afinador só busca notas no seu rango (máis rápido e sen saltos de oitava). No teclado, o que queda fóra vese máis escuro."));
     afin.setTooltip (U ("Afinación: Igual (os doce semitonos iguais), Xusta (respecto da tónica: terceiras e quintas puras), Personalizada (os cents de cada nota: maiúsculas + arrastrar no teclado) ou MTS-ESP (a que diga o mestre de MTS-ESP, ou as mensaxes MIDI de afinación)."));
     for (auto* c : { &tonica, &escala, &voz, &afin }) canvas.addAndMakeVisible (c);
+    tonica.setTitle (U ("Tónica")); escala.setTitle (U ("Escala")); voz.setTitle (U ("Tipo de voz")); afin.setTitle (U ("Afinación"));
     scl.setButtonText (".scl");
     scl.getProperties().set ("fontSize", 13.0f);
     scl.setTooltip (U ("Importar unha escala de Scala (.scl): as súas notas e os seus cents, desde a tónica."));
@@ -767,14 +906,18 @@ void TuneEditor::mouseDown (const juce::MouseEvent&) { proc.undo.beginNewTransac
 void TuneEditor::setupKnob (ui::Knob& k, const char* id, const char* name, const char* tip)
 {
     k.name = U (name);
+    k.slider.setTitle (k.name);
+    k.slider.param = proc.params.getParameter (id);
     k.att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.params, id, k.slider);
     if (auto* prm = proc.params.getParameter (id)) k.slider.setDoubleClickReturnValue (true, prm->convertFrom0to1 (prm->getDefaultValue()));
     k.slider.setTooltip (U (tip));
     canvas.addAndMakeVisible (k);
 }
 
-void TuneEditor::setupBar (juce::Slider& s, const char* id, const juce::String& tip)
+void TuneEditor::setupBar (ui::ValueSlider& s, const char* id, const juce::String& tip, const juce::String& title)
 {
+    s.param = proc.params.getParameter (id);
+    s.setTitle (title);
     s.setSliderStyle (juce::Slider::LinearBar);
     s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     s.setMouseDragSensitivity (180);
@@ -799,6 +942,14 @@ void TuneEditor::setupSegment (juce::TextButton* b, int count, const char* param
         b[i].onClick = [this, id, i] { proc.setParamPlain (id, (float) i); refresh(); };
         canvas.addAndMakeVisible (b[i]);
     }
+}
+
+bool TuneEditor::typeValue (const juce::String& paramId, const juce::String& text)
+{
+    for (auto* k : { &vel, &transi, &tol, &tolT, &flex, &human, &vib, &cant, &form, &trans, &air, &vgDepth, &vgRate, &vgDelay, &vgVar, &vgTrem, &principal, &la, &mest, &vol, &bend })
+        if (k->slider.param != nullptr && k->slider.param->paramID == paramId) return k->slider.applyText (text);
+    for (auto& row : hBar) for (auto& b : row) if (b.param != nullptr && b.param->paramID == paramId) return b.applyText (text);
+    return false;
 }
 
 void TuneEditor::showTab (int t)
@@ -1015,7 +1166,7 @@ void TuneEditor::paintCanvas (juce::Graphics& g)
     swatch (28, col::escuma, "escala");
     swatch (92, col::sodio, "libre");
     swatch (148, col::lina, U ("fóra"));
-    small (U ("maiúsculas + arrastrar: cents da nota (afinación Personalizada)"), { 210, kbY + kbH + 7, 400, 16 });
+    small (U ("clic dereito nun mando: escribir o valor · maiúsculas: fino, ou os cents da tecla"), { 210, kbY + kbH + 7, 490, 16 });
 
     g.setFont (body (12.0f)); g.setColour (col::neboa.withAlpha (0.5f));
     g.drawText (U ("Escoita   42°14′N 8°43′W"), juce::Rectangle<int> (712, kbY + kbH + 7, 300, 16), juce::Justification::centredRight, false);

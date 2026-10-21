@@ -51,6 +51,7 @@ namespace ui
         void paintArc (juce::Graphics&, juce::Rectangle<float>);
         void paintTrace (juce::Graphics&, juce::Rectangle<float>);
         TuneProcessor& proc;
+        int spokenTarget = -2, spokenCents = 999;
         static constexpr int histSize = 520;
         std::array<TuneProcessor::Frame, histSize> hist;
         int head = 0;
@@ -65,22 +66,41 @@ namespace ui
     class Keyboard : public juce::Component, public juce::TooltipClient
     {
     public:
-        explicit Keyboard (TuneProcessor& p) : proc (p) {}
+        explicit Keyboard (TuneProcessor& p) : proc (p) { setWantsKeyboardFocus (true); setTitle (juce::String::fromUTF8 ("Teclado da escala")); }
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDrag (const juce::MouseEvent&) override;
         void mouseMove (const juce::MouseEvent&) override;
         void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
         juce::String getTooltip() override;
+        bool keyPressed (const juce::KeyPress&) override;
+        void focusGained (FocusChangeType) override { if (focusNote < 0) focusNote = 60; announce(); repaint(); }
+        void focusLost (FocusChangeType) override { repaint(); }
         static constexpr int lo = 36, hi = 96;   // Do1 … Do6
         static constexpr float stripH = 12.0f;
     private:
         int noteAt (juce::Point<float>) const;
         juce::Rectangle<float> keyRect (int note) const;
         bool customTuning() const;
+        juce::String describe (int note) const;
+        void announce();
         TuneProcessor& proc;
-        int hover = -1, dragPc = -1;
+        int hover = -1, dragPc = -1, focusNote = -1;
         float dragStartCents = 0;
+    };
+
+    // un control que se pode escribir (clic dereito ou Cmd/Ctrl-clic) e mover fino (maiúsculas)
+    struct ValueSlider : public juce::Slider
+    {
+        ValueSlider (SliderStyle st = LinearBar) : juce::Slider (st, NoTextBox) { setWantsKeyboardFocus (true); }
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+        bool keyPressed (const juce::KeyPress&) override;
+        void showEditor();
+        bool applyText (const juce::String& text);   // o texto coma no DAW («35 ms», «−3 dB»…)
+        juce::RangedAudioParameter* param = nullptr;
+        int normalSensitivity = 220;
+        std::unique_ptr<juce::TextEditor> editor;
     };
 
     struct Knob : public juce::Component
@@ -88,7 +108,7 @@ namespace ui
         Knob();
         void resized() override;
         void paint (juce::Graphics&) override;
-        juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
+        ValueSlider slider { juce::Slider::RotaryHorizontalVerticalDrag };
         juce::String name;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> att;
     };
@@ -104,6 +124,8 @@ public:
     void mouseDown (const juce::MouseEvent&) override;   // (global) cada xesto, un paso de desfacer
     void tick() { timerCallback(); }   // para as probas
     void showTab (int t);              // para as probas
+    bool typeValue (const juce::String& paramId, const juce::String& text);   // para as probas: escribir nun mando
+    ui::Keyboard& keyboardForTests() { return keyboard; }
     static constexpr int W = 1040, H = 692;
     enum Tab { TabCorrection = 0, TabVoice, TabHarmony, TabOutput, numTabs };
 
@@ -127,7 +149,7 @@ private:
     void layout();
     void setupKnob (ui::Knob&, const char* id, const char* name, const char* tip);
     void setupSegment (juce::TextButton* b, int count, const char* paramId, const char* const* names, const char* const* tips);
-    void setupBar (juce::Slider&, const char* id, const juce::String& tip);
+    void setupBar (ui::ValueSlider&, const char* id, const juce::String& tip, const juce::String& title);
     void refresh();
     void rebuildPresetMenu();
     void presetChosen();
@@ -160,7 +182,7 @@ private:
     juce::TextButton harmMode[2];
     juce::TextButton hOn[TuneProcessor::numHarmonies];
     juce::ComboBox hInt[TuneProcessor::numHarmonies];
-    juce::Slider hBar[TuneProcessor::numHarmonies][5];
+    ui::ValueSlider hBar[TuneProcessor::numHarmonies][5];
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> buttonAtts;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> comboAtts;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sliderAtts;

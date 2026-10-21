@@ -1154,6 +1154,42 @@ int main (int argc, char** argv)
         check ("estado ao chou: chegan todos os parámetros", diff == 0);
     }
 
+    // accesibilidade e teclado: escribir valores nos mandos (con unidades, coma decimal e
+    // o «−» tipográfico), o teclado da escala sen rato e a pantalla que di a nota
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        p.prepareToPlay (SR, 512);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
+        auto* te = dynamic_cast<TuneEditor*> (ed.get());
+        auto val = [&] (const char* id) { return p.params.getRawParameterValue (id)->load(); };
+        const bool t1 = te->typeValue ("velocidade", "35 ms") && std::abs (val ("velocidade") - 35.0f) < 0.5f;
+        const bool t2 = te->typeValue ("volume", juce::String::fromUTF8 ("−3,5 dB")) && std::abs (val ("volume") + 3.5f) < 0.05f;
+        const bool t3 = te->typeValue ("harm1_pan", "I40") && std::abs (val ("harm1_pan") + 40.0f) < 0.5f;
+        const bool t4 = te->typeValue ("principal", "non") && val ("principal") < -47.0f;
+        auto& kb = te->keyboardForTests();
+        kb.keyPressed (juce::KeyPress (juce::KeyPress::rightKey));   // Do3 -> Do♯3
+        kb.keyPressed (juce::KeyPress (juce::KeyPress::rightKey));   // -> Re3
+        const uint16_t before = p.effectiveMask();
+        kb.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey));   // quita Re da escala
+        const bool k1 = ((before >> 2) & 1) && ! ((p.effectiveMask() >> 2) & 1);
+        kb.keyPressed (juce::KeyPress ('f', {}, 'f'));                // Re libre
+        const bool k2 = (p.freeMask() >> 2) & 1;
+        const bool k3 = kb.getTitle().contains ("Re3");
+        // a pantalla: canta un Do e mira o título
+        juce::AudioBuffer<float> buf (2, 512);
+        for (int pos = 0; pos + 512 <= (int) (SR * 0.6); pos += 512)
+        {
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) (pos + i)]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            te->tick();
+        }
+        juce::String dispTitle;
+        for (auto* c : ed->getChildren()) for (auto* cc : c->getChildren()) if (cc->getTitle().startsWith ("Afinador")) dispTitle = cc->getTitle();
+        std::printf ("accesibilidade: escribir %d%d%d%d, teclado %d%d%d («%s»), pantalla «%s»\n", t1, t2, t3, t4, k1, k2, k3, kb.getTitle().toRawUTF8(), dispTitle.toRawUTF8());
+        check ("accesibilidade: escribir valores, teclado sen rato e a nota anunciada", t1 && t2 && t3 && t4 && k1 && k2 && k3 && dispTitle.contains ("Do3"));
+    }
+
     // texto <-> valor de todos os parámetros (coma o comproba clap-validator): o texto dun
     // valor, lido de volta, dá o mesmo texto; tamén se o texto chega en UTF-8 lido coma
     // ASCII (cada byte un carácter), que é como o pasa o envoltorio CLAP

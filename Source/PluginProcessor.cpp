@@ -242,16 +242,16 @@ void TuneProcessor::pushFrame()
     fifo.prepareToWrite (1, s1, n1, s2, n2);
     if (n1 + n2 == 0) return;
     auto& f = frames[(size_t) (n1 > 0 ? s1 : s2)];
-    f.inMidi = (float) engine.inputMidi;
-    f.outMidi = (float) engine.outputMidi;
+    f.inMidi = (float) engine.inputMidi();
+    f.outMidi = (float) engine.outputMidi();
     f.target = (int16_t) engine.targetNote();
-    f.voiced = engine.voiced ? 1 : 0;
+    f.voiced = engine.isVoiced() ? 1 : 0;
     fifo.finishedWrite (1);
 
-    if (keyListening.load() && engine.voiced && engine.clarity() > 0.75)
+    if (keyListening.load() && engine.isVoiced() && engine.clarity() > 0.75)
     {
         const float dt = 256.0f / (float) getSampleRate();
-        const int pc = ((int) std::lround (engine.inputMidi) % 12 + 12) % 12;
+        const int pc = ((int) std::lround (engine.inputMidi()) % 12 + 12) % 12;
         keyHist[(size_t) pc] = keyHist[(size_t) pc].load() + dt;
         keyHeard = keyHeard.load() + dt;
     }
@@ -334,9 +334,9 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         else if (m.isNoteOff()) engine.noteOff (m.getNoteNumber());
     }
 
-    nowIn = (float) engine.inputMidi; nowOut = (float) engine.outputMidi;
-    nowHz = (float) engine.detectedHz; nowCents = (float) engine.correctionCents;
-    nowTarget = engine.targetNote(); nowVoiced = engine.voiced;
+    nowIn = (float) engine.inputMidi(); nowOut = (float) engine.outputMidi();
+    nowHz = (float) engine.detectedHz(); nowCents = (float) engine.correctionCents();
+    nowTarget = engine.targetNote(); nowVoiced = engine.isVoiced();
     nowHeld = engine.heldPitchClasses();
     inLevel = levelAcc;
     outLevel = outAcc;

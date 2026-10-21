@@ -18,6 +18,7 @@ public:
         size = 1; while (size < 2 * tauAlloc + 8) size <<= 1;
         buf.assign ((size_t) size, 0.0f);
         d.assign ((size_t) tauAlloc + 4, 0.0);
+        comb.assign ((size_t) tauAlloc + 4, 0.0);
         cum.assign ((size_t) tauAlloc + 4, 0.0);
         lp1.lowpass (dsr * 0.42, sr, 0.54); lp2.lowpass (dsr * 0.42, sr, 1.31);
         hop = std::max (1, (int) std::lround (dsr * 0.004));   // ~4 ms
@@ -115,6 +116,7 @@ private:
             if (best >= 0 && global > 0 && std::lround ((double) best / global) >= 3 && multipleOf ((double) best, (double) global)) best = global;
         }
         const bool following = best >= 0;
+        bool combed = false;
         if (best < 0) best = global;
         if (best < 0)
         {
@@ -124,6 +126,28 @@ private:
             for (int t = tauMin + 1; t < tauMax - 1; ++t)
                 if (d[(size_t) t] <= d[(size_t) t - 1] && d[(size_t) t] <= d[(size_t) t + 1] && (best < 0 || d[(size_t) t] < d[(size_t) best])) best = t;
             if (best < 0 || d[(size_t) best] > 0.35)
+            {
+                // voz con moito aire ou ruído: ningún val chega, pero o período ten val en
+                // todos os seus múltiplos e o ruído non
+                // (só se a nota que se segue cabe dúas veces na xanela: dunha voz grave non
+                // se poden mirar os múltiplos, e o que saía era outro período)
+                double prom = 0;
+                const int cb = voiced && pt > (tauMax - 2) / 2 ? -1 : combSearch (prom);
+                int pick = -1;
+                // seguindo unha nota, primeiro arredor dela (±15 %), e alí abonda con menos;
+                // outro período cun val tan pouco fondo adoita ser outra cousa (a oitava, a
+                // guitarra de fondo) e pide o mesmo ca o comezo dunha nota
+                if (voiced && cb > 0)
+                {
+                    const int lo = std::max (tauMin + 1, (int) std::floor (pt * 0.87)), hi = std::min ((tauMax - 2) / 2 - 1, (int) std::ceil (pt * 1.15));
+                    for (int t = lo; t <= hi; ++t)
+                        if (comb[(size_t) t] <= comb[(size_t) t - 1] && comb[(size_t) t] <= comb[(size_t) t + 1] && (pick < 0 || comb[(size_t) t] < comb[(size_t) pick])) pick = t;
+                    if (pick > 0 && combMean - comb[(size_t) pick] < combNear) pick = -1;
+                }
+                if (pick < 0 && cb > 0 && prom >= combNew) pick = cb;
+                if (pick > 0) { best = pick; combed = true; }
+            }
+            if (best < 0 || (d[(size_t) best] > 0.35 && ! combed))
             {
                 clarity = best < 0 ? 0.0 : 1.0 - d[(size_t) best];
                 // unha soa lectura mala non apaga a voz (mantén o período anterior)
@@ -156,7 +180,7 @@ private:
         // formante no segundo harmónico: a voz é case periódica a medio período), nin unha
         // abaixo (o val ao dobre do período é sempre case tan fondo coma o verdadeiro). E,
         // como se mira en cada lectura, un erro solto non queda enganchado pola continuidade.
-        if (best > 0 && ! common) best = following ? octaveSwitch (best) : octaveFamily (best);
+        if (best > 0 && ! common && ! combed) best = following ? octaveSwitch (best) : octaveFamily (best);
         double tau = best;
         if (best > 1 && best < tauMax)
         {
@@ -200,6 +224,44 @@ private:
             if (at > lo && at < hi && (mlt > 1.0 ? there < 0.5 * here - 0.01 : there <= here)) return at;
         }
         return best;
+    }
+
+    // Con moito aire ou ruído o val do período non baixa do limiar, pero aparece en todos
+    // os seus múltiplos (P, 2P, 3P, 4P) e o ruído non. A media deles (cada un ±1 mostra: o
+    // múltiplo cae entre mostras) ten que quedar claramente por baixo do resto da curva.
+    // Entre os case iguais, o máis curto (os múltiplos de P tamén teñen os seus múltiplos)
+    int combSearch (double& prominence)
+    {
+        prominence = 0;
+        double mean = 0;
+        for (int t = tauMin; t < tauMax; ++t) mean += d[(size_t) t];
+        mean /= std::max (1, tauMax - tauMin);
+        combMean = mean;
+        double smin = 1e9;
+        const int tEnd = (tauMax - 2) / 2;
+        for (int t = tauMin; t <= tEnd; ++t)
+        {
+            double sum = 0; int k = 0;
+            for (int m = 1; m <= 4 && m * t + 1 < tauMax; ++m, ++k)
+            {
+                const int c = m * t;
+                sum += std::min ({ d[(size_t) c - 1], d[(size_t) c], d[(size_t) c + 1] });
+            }
+            comb[(size_t) t] = sum / k;
+            smin = std::min (smin, comb[(size_t) t]);
+        }
+        if (smin > 0.65) return -1;
+        auto dmin3 = [this] (int c) { return std::min ({ d[(size_t) c - 1], d[(size_t) c], d[(size_t) c + 1] }); };
+        for (int t = tauMin + 1; t < tEnd; ++t)
+            if (comb[(size_t) t] <= smin + 0.05 && comb[(size_t) t] <= comb[(size_t) t - 1] && comb[(size_t) t] <= comb[(size_t) t + 1])
+            {
+                // se o val ao dobre é claramente máis fondo ca o seu, t é medio período (unha
+                // voz grave co segundo harmónico forte): o de verdade non se pode mirar así
+                if (dmin3 (2 * t) < dmin3 (t) - 0.15) return -1;
+                prominence = mean - comb[(size_t) t];
+                return t;
+            }
+        return -1;
     }
 
     // Dentro dun período común «tc» (múltiplo de «old», a nota que remata), a nota nova: o
@@ -299,7 +361,12 @@ private:
     double sr = 48000, dsr = 12000;
     int decim = 4, tauMin = 2, tauMax = 200, win = 200, size = 1024, hop = 48;
     std::vector<float> buf;
-    std::vector<double> d, cum;
+    std::vector<double> d, cum, comb;
+    double combMean = 1.0;
+    // canto por baixo do resto da curva ten que quedar a media dos múltiplos: arredor da
+    // nota que se segue, e para unha nota nova (voz aireada: erros 8,2 -> 2,6 %, tramas
+    // perdidas 16 -> 11 %; máis baixo, a guitarra de fondo e as voces graves daban notas)
+    static constexpr double combNear = 0.4, combNew = 0.5;
     int64_t frameStart = 0;
     Biquad lp1, lp2;
     double hp = 0, hpPrev = 0;

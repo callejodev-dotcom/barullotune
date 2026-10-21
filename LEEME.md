@@ -58,7 +58,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 | `tools/RenderTest.cpp` | Proba sen interface; con `--file entrada.wav saida.wav parámetro=valor…` procesa un ficheiro; con `--json metricas.json` garda as métricas; imprime a **huella da saída** (para comprobar que un cambio de organización non cambia nin un bit) |
 | `tools/DetectorTest.cpp` | O detector en condicións difíciles, con ton verdadeiro coñecido (só o motor, sen JUCE): segundo harmónico dominante, sen fundamental, voz aireada, ruído a 10 e 5 dB, reverberación, voz grave, soprano e vibrato ancho |
 | `tools/compara.py` | Compara as métricas coa base (`tools/metricas-base.json`, `tools/banco-base.json`) e falla se algo empeora; con `--gardar` actualiza a base |
-| `tools/banco.py` | Banco de voces reais: cada voz polos tres xeitos, con cents, saltos (a saída sepárase máis de 1,6 semitonos da entrada) e perdas |
+| `tools/banco.py` | Banco de voces reais: cada voz polos tres xeitos, con cents, saltos (a saída sepárase máis de 1,6 semitonos da entrada durante 30 ms ou máis) e perdas |
 | `tools/analise.py` | Mide a afinación dunha voz antes e despois (YIN, vibrato, centro das notas, gráfico) |
 | `tools/voces/LEEME.md` | De onde saen as voces reais das probas |
 | `packaging/` | Instaladores para Mac, Windows e Linux |
@@ -72,8 +72,10 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 
   | | Directo | Preciso | Estudio |
   |---|---|---|---|
-  | afinación nas notas (cents) | 0,8 (antes 1,4) | 0,6 (antes 0,7) | 0,5 (antes 0,6) |
-  | saltos (a saída a máis de 1,6 semitonos da voz) | 1,1 % (antes 6,2 %) | 0,9 % (antes 4,3 %) | 1,5 % (antes 7,8 %) |
+  | afinación nas notas (cents) | 0,8 (antes 1,4) | 0,5 (antes 0,7) | 0,5 (antes 0,6) |
+  | saltos (a saída a máis de 1,6 semitonos da voz) | 0,4 % (antes 6,2 %) | 0,4 % (antes 4,3 %) | 0,7 % (antes 7,8 %) |
+
+  Os saltos cóntanse coa mediana de 5 tramas do ton de referencia e só se duran 30 ms ou máis: o YIN de referencia salta ás veces unha oitava nunha soa trama, na entrada ou na saída (na voz de flamenco, co segundo harmónico 18 dB por riba do fundamental, abonda un cambio mínimo da onda), e iso non é un salto do afinador. As cifras «antes» son coa conta vella, trama a trama.
 
   Os saltos eran a nota de destino quedando atrás nos glisandos rápidos. Agora cada voz de saída decide a súa nota co ton do punto que está lendo (Estudio, coa media dos ciclos a ±10 ms do grano, que xa ten medidos) e, nun glisando de máis dun semitono que non sexa vibrato, o suavizado da decisión volve empezar no ton de agora.
 - **Detector en condicións difíciles** (`BTDetectorTest`): tramas con voz a máis de medio semitono do ton verdadeiro.
@@ -83,7 +85,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
   | voz limpa | 1,2 % | 1,2 % |
   | segundo harmónico dominante | 21,4 % | 2,0 % |
   | sen fundamental | 0,9 % | 1,0 % |
-  | voz aireada (HNR ~5 dB) | 59,2 % | 8,2 % |
+  | voz aireada (HNR ~5 dB) | 59,2 % | 2,6 % |
   | ruído rosa a 10 dB | 11,1 % | 0,5 % |
   | ruído rosa a 5 dB | 56,4 % | 1,4 % |
   | reverberación longa (RT60 1,2 s) | 33,5 % | 6,6 % |
@@ -92,6 +94,8 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
   A oitava decídese mirando a familia do val elixido (a metade, o dobre e os múltiplos ata 4, e con ruído os submúltiplos ata 1/5): gaña o período máis curto que sexa case tan fondo coma o máis fondo, co fondo medido no atraso fraccionario (Lagrange cúbica), que nas voces agudas cae entre dúas mostras. Seguindo unha nota, a oitava só cambia con probas claras, para non facer saltos soltos nas voces graves reais.
 
   Na reverberación, ao cambiar de nota a cola da anterior segue soando e as dúas xuntas repítense ao seu período común (dunha cuarta, 3 períodos da vella = 4 da nova): ese val é o máis fondo e o detector quedaba alí, dúas oitavas por debaixo, ata 200 ms. Agora un cambio a un múltiplo da nota anterior busca dentro del a nova (o submúltiplo con val de seu que non é da vella), e se aínda non o ten mantén a anterior ata 24 ms; seguindo unha nota, un val a un múltiplo dela non a fai cambiar, e se o que se segue é un múltiplo do primeiro val claro, vaise a este. Mentres soa a cola (0,4 s), a oitava non baixa ao dobre se o val de agora xa é periódico de seu. As medidas son coa serie de ruído nova, igual en todos os sistemas.
+
+  Con moito aire ou ruído (unha «i» aguda e aireada, co primeiro formante por baixo do fundamental) o val do período non chega ao limiar e a nota enteira quedaba sen afinar. Pero o período ten val en todos os seus múltiplos e o ruído non: se ningún val chega, mírase a media dos vales en P, 2P, 3P e 4P, e se queda claramente por baixo do resto da curva hai voz en P. Seguindo unha nota abonda con menos e só arredor dela; unha nota nova pide máis, e un candidato co val ao dobre claramente máis fondo é medio período e non vale (nas voces graves non se poden mirar os múltiplos). Tramas con voz perdidas: voz aireada 16,1 → 10,6 %, ruído a 5 dB 10,8 → 5,5 %.
 - **Glisandos** sintéticos (ata 40 st/s), robot: tramas con a saída a máis de 1,1 semitonos da voz: 2,6–2,9 % (antes 16–23 %).
 - **Vibrato rápido con tremor** (6,2 Hz, ±45 c, tremor de período de 0,6 % ciclo a ciclo), robot: a nota queda plana a 1,1 c en Directo (antes 6,0 c), 0,3 c en Preciso e 0,1 c en Estudio. En Directo, a tendencia curta (os últimos tres cuartos de período) e o suavizado de 0,4 ms seguen mellor as subidas rápidas; sen ton, o suavizado vai a 2 ms para que a «s» non estale.
 - **Condicións reais**: voz moi baixa (picos a −45 dBFS), ruído rosa a 20 dB de SNR, reverberación e 96 kHz: afina igual ca coa voz limpa (con ruído a 10 dB, algo menos).

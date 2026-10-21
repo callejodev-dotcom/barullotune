@@ -9,7 +9,10 @@ Métricas por voz e xeito:
   cents   distancia media da saída ao semitono máis próximo, onde a saída está quieta
           (nos cambios de nota a xanela de análise colle dúas notas e non mide afinación)
   saltos  % de tramas nas que a saída se separa da entrada máis de 1,6 semitonos
-          (un salto de oitava ou de nota que a corrección non debería facer)
+          (un salto de oitava ou de nota que a corrección non debería facer). O ton de
+          referencia (YIN) salta ás veces unha oitava nunha soa trama, na entrada ou na
+          saída (cun segundo harmónico forte abonda un cambio mínimo da onda): mírase a
+          mediana de 5 tramas e o salto ten que durar polo menos 3 seguidas (30 ms)
   perdas  % de tramas con voz na entrada e sen ton claro na saída
 """
 import json, os, subprocess, sys, tempfile
@@ -27,6 +30,29 @@ def find(root, name):
             return os.path.join(d, name + ".wav")
     return None
 
+def median5(m):
+    """mediana de 5 tramas, sen contar as que non teñen ton (con menos de 3, sen ton)"""
+    r = np.full(len(m), np.nan)
+    for i in range(len(m)):
+        w = m[max(0, i - 2):i + 3]
+        w = w[~np.isnan(w)]
+        if len(w) >= 3 and not np.isnan(m[i]):
+            r[i] = np.median(w)
+    return r
+
+def lasting(mask, k):
+    """só as tramas de tramos de polo menos k seguidas"""
+    r = np.zeros(len(mask), bool); i = 0
+    while i < len(mask):
+        if mask[i]:
+            j = i
+            while j < len(mask) and mask[j]: j += 1
+            if j - i >= k: r[i:j] = True
+            i = j
+        else:
+            i += 1
+    return r
+
 def measure(src, out):
     sr, x = analise.load(src); _, y = analise.load(out)
     fi, _, hop = analise.yin(x, sr); fo, _, _ = analise.yin(y, sr)
@@ -40,7 +66,10 @@ def measure(src, out):
     for i in range(k, n - k):
         w = mo[i - k:i + k + 1]
         stable[i] = not np.isnan(w).any() and (w.max() - w.min()) < 0.25
-    jumps = np.abs(mo[ok] - mi[ok]) > 1.6
+    ms, ns = median5(mi), median5(mo)
+    oks = ~np.isnan(ms) & ~np.isnan(ns)
+    dev = np.zeros(n, bool); dev[oks] = np.abs(ns[oks] - ms[oks]) > 1.6
+    jumps = lasting(dev, 3)[ok]
     st = stable & ok & ~(np.abs(mo - mi) > 1.6)
     d = np.abs(mo[st] - np.round(mo[st])) * 100
     return {"cents": float(d.mean()) if st.any() else 0.0,

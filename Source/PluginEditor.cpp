@@ -379,6 +379,79 @@ void Display::paint (juce::Graphics& g)
     paintTrace (g, trace);
 }
 
+// ================================================================ práctica
+PracticePanel::PracticePanel (TuneProcessor& p) : proc (p)
+{
+    reset.setButtonText (T ("Empezar de novo"));
+    reset.onClick = [this] { proc.resetPractice(); repaint(); };
+    close.setButtonText (T ("Pechar"));
+    close.onClick = [this] { if (onClose) onClose(); };
+    addAndMakeVisible (reset);
+    addAndMakeVisible (close);
+    setTitle (T ("Informe"));
+}
+
+void PracticePanel::resized()
+{
+    close.setBounds (getWidth() - 100, 12, 86, 26);
+    reset.setBounds (getWidth() - 236, 12, 128, 26);
+}
+
+void PracticePanel::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (col::fondo2); g.fillRoundedRectangle (r, 8.0f);
+    g.setColour (col::lina); g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
+    const auto pr = proc.practice();
+    g.setFont (cond (28.0f)); g.setColour (col::escuma);
+    g.drawText (T ("Como afinas"), juce::Rectangle<float> (20.0f, 10.0f, 300.0f, 32.0f), juce::Justification::centredLeft, false);
+    if (pr.seconds < 1.0f)
+    {
+        g.setFont (body (17.0f)); g.setColour (col::neboa);
+        g.drawText (T ("Canta un anaco e aquí verás como afinas (a túa voz, antes de corrixila)."), r.reduced (20.0f, 60.0f), juce::Justification::centredLeft, true);
+        return;
+    }
+    // á esquerda, as cifras
+    auto stat = [&] (float y, const juce::String& big, const juce::String& label)
+    {
+        g.setFont (cond (30.0f)); g.setColour (col::escuma);
+        g.drawText (big, juce::Rectangle<float> (20.0f, y, 110.0f, 32.0f), juce::Justification::centredLeft, false);
+        g.setFont (body (14.5f)); g.setColour (col::neboa);
+        g.drawText (label, juce::Rectangle<float> (130.0f, y + 4.0f, 230.0f, 26.0f), juce::Justification::centredLeft, false);
+    };
+    const int secs = juce::roundToInt (pr.seconds);
+    stat (52.0f, juce::String (juce::roundToInt (pr.within10 * 100.0f)) + " %", T ("do tempo, a menos de 10 cents"));
+    stat (88.0f, juce::String (juce::roundToInt (pr.within25 * 100.0f)) + " %", T ("a menos de 25 cents"));
+    stat (124.0f, juce::String (juce::roundToInt (pr.meanAbs)) + " c", T ("de desviación media"));
+    const int tend = juce::roundToInt (pr.meanSigned);
+    stat (160.0f, (tend > 0 ? "+" : tend < 0 ? juce::String::fromUTF8 ("−") : "") + juce::String (std::abs (tend)) + " c",
+          std::abs (tend) < 4 ? T ("centrada") : tend > 0 ? T ("tendes a ir alta") : T ("tendes a ir baixa"));
+    g.setFont (body (13.5f)); g.setColour (col::neboa);
+    g.drawText (T ("tempo cantado: ") + juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2),
+                juce::Rectangle<float> (20.0f, r.getBottom() - 30.0f, 300.0f, 20.0f), juce::Justification::centredLeft, false);
+    // á dereita, unha barra por nota: canto vai alta (arriba) ou baixa (abaixo)
+    auto area = juce::Rectangle<float> (380.0f, 52.0f, r.getWidth() - 400.0f, r.getHeight() - 84.0f);
+    const float zero = area.getCentreY(), half = area.getHeight() * 0.5f - 14.0f, bw = area.getWidth() / 12.0f;
+    g.setColour (col::lina); g.fillRect (area.getX(), zero - 0.5f, area.getWidth(), 1.0f);
+    g.setFont (body (11.5f));
+    for (const int c : { -25, 25 })
+    {
+        const float y = zero - (float) c / 50.0f * half;
+        g.setColour (col::lina.withAlpha (0.6f)); g.fillRect (area.getX(), y - 0.5f, area.getWidth(), 1.0f);
+        g.setColour (col::neboa); g.drawText ((c > 0 ? "+" : juce::String::fromUTF8 ("−")) + "25", juce::Rectangle<float> (area.getX() - 34.0f, y - 8.0f, 30.0f, 16.0f), juce::Justification::centredRight, false);
+    }
+    for (int i = 0; i < 12; ++i)
+    {
+        const float x = area.getX() + bw * (float) i;
+        g.setFont (semi (13.0f)); g.setColour (pr.noteSeconds[i] > 0.3f ? col::escuma : col::neboa.withAlpha (0.5f));
+        g.drawText (scales::noteName (i), juce::Rectangle<float> (x, area.getBottom() - 2.0f, bw, 18.0f), juce::Justification::centred, false);
+        if (pr.noteSeconds[i] <= 0.3f) continue;   // pouco cantada: sen barra
+        const float m = juce::jlimit (-50.0f, 50.0f, pr.noteMean[i]), h = m / 50.0f * half;
+        g.setColour (std::abs (m) > 10.0f ? col::sodio : col::escuma.withAlpha (0.85f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (x + bw * 0.25f, h > 0 ? zero - h : zero, bw * 0.5f, std::abs (h) + 1.0f), 2.0f);
+    }
+}
+
 // ================================================================ teclado
 juce::Rectangle<float> Keyboard::keyRect (int note) const
 {
@@ -695,6 +768,17 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     canvas.painter = [this] (juce::Graphics& g) { paintCanvas (g); };
     canvas.addAndMakeVisible (display);
     canvas.addAndMakeVisible (keyboard);
+    canvas.addChildComponent (practicePanel);
+    practicePanel.onClose = [this] { practicePanel.setVisible (false); practiceBtn.setVisible (true); };
+    practiceBtn.setButtonText (T ("Informe"));
+    practiceBtn.getProperties().set ("fontSize", 13.0f);
+    practiceBtn.setTooltip (T ("Como afinas ti (a voz que entra, sen corrixir): canto tempo estás preto da nota e en que notas tendes a ir alta ou baixa."));
+    practiceBtn.onClick = [this]
+    {
+        practicePanel.setVisible (true);
+        practiceBtn.setVisible (false);   // o panel ten o seu «Pechar»
+    };
+    canvas.addAndMakeVisible (practiceBtn);
     // accesibilidade: o tabulador percorre os controis; cada un co seu nome
     canvas.setFocusContainerType (juce::Component::FocusContainerType::keyboardFocusContainer);
     canvas.setTitle ("Barullo Tune");
@@ -1102,6 +1186,7 @@ void TuneEditor::timerCallback()
     proc.finishKeyIfReady();
     display.update();
     keyboard.repaint();
+    if (practicePanel.isVisible()) practicePanel.update();
     refresh();
     // a lista dos presets propios cambia se alguén garda ou borra ficheiros
     static int countdown = 0;
@@ -1209,6 +1294,8 @@ void TuneEditor::layout()
     for (int i = 0; i < 3; ++i) calBtn[i].setBounds (790 + i * 74 - (i > 0 ? 1 : 0), 24, 74 + (i > 0 ? 1 : 0), 34);
 
     display.setBounds (28, 84, 984, 240);
+    practicePanel.setBounds (28, 84, 984, 240);
+    practiceBtn.setBounds (28 + 984 - 128, 92, 78, 22);   // (á esquerda do medidor de saída)
 
     // pestanas (e, en Armonías, o seu modo á dereita)
     for (int i = 0; i < numTabs; ++i) tabBtn[i].setBounds (28 + i * 112 - (i > 0 ? 1 : 0), tabY, 112 + (i > 0 ? 1 : 0), tabH);

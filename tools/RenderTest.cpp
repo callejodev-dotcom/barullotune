@@ -204,7 +204,8 @@ static void snapshot (const juce::File& png, int tab)
     setP (p, "harm1", 1); setP (p, "harm2", 1); setP (p, "flexibilidade", 20); setP (p, "vibgen_fondo", 18);
     std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
     auto* te = dynamic_cast<TuneEditor*> (ed.get());
-    te->showTab (tab);
+    te->showTab (tab == 4 ? 0 : tab);
+    if (tab == 4) te->showPractice (true);   // 4: o informe da práctica
     juce::AudioBuffer<float> buf (2, 512);
     const int stop = (int) (SR * 4.6);
     for (int pos = 0; pos + 512 <= stop; pos += 512)
@@ -1073,6 +1074,28 @@ int main (int argc, char** argv)
         std::printf ("tonalidade co acompañamento: %s %s (en %.1f s)\n", scales::noteName ((int) p.params.getRawParameterValue ("tonica")->load()).toRawUTF8(),
                      scales::all()[(size_t) p.params.getRawParameterValue ("escala")->load()].name, samples / SR);
         check ("tonalidade co acompañamento na entrada lateral: Re maior", layoutOk && done && p.effectiveMask() == dMajor);
+    }
+
+    // práctica: a melodía de proba vai desafinada de propósito (Re −38/−42, Mi +28/+33,
+    // La +40…): o informe ten que dicilo, nota a nota
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        major (p);
+        p.prepareToPlay (SR, 512);
+        juce::AudioBuffer<float> buf (2, 512);
+        for (int pos = 0; pos + 512 <= (int) voice.size(); pos += 512)
+        {
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) (pos + i)]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+        }
+        const auto pr = p.practice();
+        std::printf ("práctica: %.1f s, %.0f %% a menos de 25 c, media %.1f c | Re %+.1f, Mi %+.1f, La %+.1f\n", pr.seconds, pr.within25 * 100, pr.meanAbs, pr.noteMean[2], pr.noteMean[4], pr.noteMean[9]);
+        p.resetPractice();
+        { juce::MidiBuffer m; p.processBlock (buf, m); }
+        const bool resetOk = p.practice().seconds < 0.05f;
+        check ("práctica: o informe di como vai cada nota", pr.seconds > 5.0f && pr.within25 < 0.5f && pr.noteMean[2] < -32 && pr.noteMean[2] > -46
+                                                            && pr.noteMean[4] > 23 && pr.noteMean[4] < 38 && pr.noteMean[9] > 32 && pr.noteMean[9] < 47 && resetOk);
     }
 
     // presets: Robot pon velocidade, transición e vibrato a 0; o preset gárdase co estado

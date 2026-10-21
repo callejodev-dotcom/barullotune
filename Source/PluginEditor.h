@@ -61,6 +61,20 @@ namespace ui
         float inLv = 0, outLv = 0;
     };
 
+    // o informe da práctica: como afina quen canta (por riba da pantalla)
+    class PracticePanel : public juce::Component
+    {
+    public:
+        explicit PracticePanel (TuneProcessor& p);
+        void paint (juce::Graphics&) override;
+        void resized() override;
+        void update() { repaint(); }
+        std::function<void()> onClose;
+    private:
+        TuneProcessor& proc;
+        juce::TextButton reset, close;
+    };
+
     // o teclado: unha tira enriba de cada tecla di se a nota está na escala, fóra ou libre.
     // Coa afinación Personalizada, maiúsculas + arrastrar en vertical cambia os cents da nota
     class Keyboard : public juce::Component, public juce::TooltipClient
@@ -126,6 +140,7 @@ public:
     void showTab (int t);              // para as probas
     bool typeValue (const juce::String& paramId, const juce::String& text);   // para as probas: escribir nun mando
     ui::Keyboard& keyboardForTests() { return keyboard; }
+    void showPractice (bool show) { if (show != practicePanel.isVisible() && practiceBtn.onClick) practiceBtn.onClick(); }
     static constexpr int W = 1040, H = 692;
     enum Tab { TabCorrection = 0, TabVoice, TabHarmony, TabOutput, numTabs };
 
@@ -162,6 +177,8 @@ private:
 
     ui::Display display { proc };
     ui::Keyboard keyboard { proc };
+    ui::PracticePanel practicePanel { proc };
+    juce::TextButton practiceBtn;
 
     // cabeceira
     juce::ComboBox preset;

@@ -198,6 +198,15 @@ public:
     bool finishKeyIfReady();   // fío da interface: aplica a tonalidade cando xa escoitou abondo
     void flushLatencyUpdate() { handleUpdateNowIfNeeded(); }   // para as probas
 
+    // práctica: como afina quen canta (a voz de entrada respecto da nota á que vai)
+    struct Practice
+    {
+        float seconds = 0, within10 = 0, within25 = 0, meanAbs = 0, meanSigned = 0;
+        float noteSeconds[12] {}, noteMean[12] {};   // por nota (clase de altura): tempo e desviación media (cents, con signo)
+    };
+    Practice practice() const;
+    void resetPractice() { practiceReset = true; }
+
     // latencia actual en ms (para amosala)
     float latencyMs() const { return (float) (1000.0 * latencyNow.load() / juce::jmax (1.0, getSampleRate())); }
 
@@ -247,6 +256,10 @@ private:
     std::atomic<bool> keyListening { false };
     std::atomic<float> keyHeard { 0 };
     std::array<std::atomic<float>, 12> keyHist {};
+    // práctica (escribe o fío de audio en pushFrame; le a interface)
+    std::atomic<bool> practiceReset { false };
+    std::atomic<float> prSeconds { 0 }, prWithin10 { 0 }, prWithin25 { 0 }, prSumAbs { 0 }, prSum { 0 };
+    std::array<std::atomic<float>, 12> prNoteSec {}, prNoteSum {};
     // croma do acompañamento (entrada lateral)
     // FFT de 16384 (barras de 2,9 Hz a 48 kHz: medio semitono xa aos 100 Hz) cada 4096 mostras
     static constexpr int chromaOrder = 14, chromaFft = 1 << chromaOrder, chromaHop = chromaFft / 4;

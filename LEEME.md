@@ -41,6 +41,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Efecto robot**: velocidade e transición a 0 e vibrato a 0 % (ou o preset «Robot»).
 - **Presets**: Natural, Suave (con flexibilidade e humanizar), Pop, Balada (humanizada), Robot, Trap, Directo seguro, Xigante e Trasno. Só cambian o carácter da corrección, non a tonalidade nin a voz; tamén aparecen no menú de presets do DAW.
 - **Comparar**: escoita a voz sen afinar, aliñada no tempo.
+- **Informe** (na pantalla): como afinas ti, coa voz que entra antes de corrixila: o tempo cantado, canto del a menos de 10 e de 25 cents, a desviación media, se tendes a ir alta ou baixa, e unha barra por nota. Para practicar, tamén na aplicación independente.
 - **Estéreo de verdade**: o ton detéctase no centro e as dúas canles corríxense igual (a imaxe estéreo non se move).
 - **Xanela** de 75 % a 150 % (arrastrando a esquina); o tamaño gárdase co proxecto.
 - **Bypass** de verdade: a voz orixinal sae atrasada a mesma latencia ca o efecto (o DAW non a despraza) e cun fundido de 20 ms, sen clic. O motor segue escoitando, así ao volver xa sabe por onde vai a voz.
@@ -93,6 +94,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Condicións reais**: voz moi baixa (picos a −45 dBFS), ruído rosa a 20 dB de SNR, reverberación e 96 kHz: afina igual ca coa voz limpa (con ruído a 10 dB, algo menos).
 - **MTS**: unha mensaxe MIDI de afinación (o Mi a 63,75) coa afinación MTS-ESP: o Mi cantado sae a −25,0 c.
 - **Tonalidade co acompañamento**: base en Re maior (Re–Sol–La–Re) pola entrada lateral e a voz cantando só un La: Re maior en 8 s. (Sumar os histogramas facía mandar a nota longa da voz, La maior; agora cada un correlaciónase cos perfís por separado. E o croma necesita barras finas: cunha FFT de 4096 os graves repartíanse entre notas veciñas e saía Fa♯ menor; con 16 384, Re maior.)
+- **Informe da práctica**: coa melodía de proba (desafinada a propósito), Re −40,0 c, Mi +31,2 c e La +39,4 c (cantouse −38/−42, +28/+33 e +40), e «empezar de novo» ponse a cero.
 - **MIDI de saída**: a melodía de proba dá exactamente as súas 12 notas, na orde e sen solaparse. **MPE**: unha nota na canle 3 con bend na canle 3 (rango 4) sube a 64,02; co bend na canle 5, queda en 60,00.
 - **Afinación** dun Mi en Do maior (robot): igual +0,0 c, xusta −13,7 c, personalizada (+30) +30,0 c. **Scala**: a diatónica de Ptolomeo en Re carga as notas de Re maior co Fa♯ −13,69 c e o Mi +3,91 c; unha de 17 notas por oitava rexéitase cunha explicación. Os estados da versión 1 con escala «Personalizada» seguen sendo Personalizada.
 - **Vibrato xerado** (±30 c, 5,5 Hz, retardo 300 ms, trémolo 40 %) nunha nota plana con robot: antes do retardo ±0,6 c, despois ±28,4 c e o nivel oscila 3,8 dB (o agardado, 3,5 dB).

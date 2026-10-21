@@ -541,6 +541,23 @@ bool TuneProcessor::loadUserPreset (const juce::File& file)
     return true;
 }
 
+TuneProcessor::Practice TuneProcessor::practice() const
+{
+    Practice p;
+    p.seconds = prSeconds.load();
+    if (p.seconds <= 0) return p;
+    p.within10 = prWithin10.load() / p.seconds;
+    p.within25 = prWithin25.load() / p.seconds;
+    p.meanAbs = prSumAbs.load() / p.seconds;
+    p.meanSigned = prSum.load() / p.seconds;
+    for (int i = 0; i < 12; ++i)
+    {
+        p.noteSeconds[i] = prNoteSec[(size_t) i].load();
+        p.noteMean[i] = p.noteSeconds[i] > 0 ? prNoteSum[(size_t) i].load() / p.noteSeconds[i] : 0.0f;
+    }
+    return p;
+}
+
 uint16_t TuneProcessor::effectiveMask() const
 {
     const int sc = juce::jlimit (0, scales::custom, (int) pEscala->load());
@@ -640,6 +657,30 @@ void TuneProcessor::pushFrame()
     f.target = (int16_t) engine.targetNote();
     f.voiced = engine.isVoiced() ? 1 : 0;
     fifo.finishedWrite (1);
+
+    // práctica: cada trama con voz clara, a desviación da voz respecto da súa nota
+    if (practiceReset.exchange (false))
+    {
+        prSeconds = 0; prWithin10 = 0; prWithin25 = 0; prSumAbs = 0; prSum = 0;
+        for (auto& v : prNoteSec) v = 0;
+        for (auto& v : prNoteSum) v = 0;
+    }
+    if (engine.isVoiced() && engine.targetNote() >= 0 && engine.clarity() > 0.6)
+    {
+        const float dt = 256.0f / (float) getSampleRate();
+        const float dev = (float) ((engine.inputMidi() - engine.targetNote()) * 100.0);
+        if (std::abs (dev) < 60.0f)
+        {
+            const int pc = engine.targetNote() % 12;
+            prSeconds = prSeconds.load() + dt;
+            if (std::abs (dev) <= 10.0f) prWithin10 = prWithin10.load() + dt;
+            if (std::abs (dev) <= 25.0f) prWithin25 = prWithin25.load() + dt;
+            prSumAbs = prSumAbs.load() + std::abs (dev) * dt;
+            prSum = prSum.load() + dev * dt;
+            prNoteSec[(size_t) pc] = prNoteSec[(size_t) pc].load() + dt;
+            prNoteSum[(size_t) pc] = prNoteSum[(size_t) pc].load() + dev * dt;
+        }
+    }
 
     if (keyListening.load() && engine.isVoiced() && engine.clarity() > 0.75)
     {

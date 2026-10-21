@@ -155,10 +155,6 @@ jobs:
         run: |
           ./build/BTDetectorTest_artefacts/Release/BTDetectorTest --json detector.json
           python3 tools/compara.py tools/detector-base.json detector.json
-      - name: Traducións (ningún texto sen os seis idiomas)
-        run: |
-          BT_LANG_KEYS=claves.txt ./build/BTRenderTest_artefacts/Release/BTRenderTest > /dev/null
-          python3 tools/idiomas.py --claves claves.txt
       - name: Voces reais (sen retrocesos respecto da base)
         run: |
           mkdir -p "$RUNNER_TEMP/voces" && cd "$RUNNER_TEMP/voces"

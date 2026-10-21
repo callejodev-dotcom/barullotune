@@ -4,7 +4,7 @@
 
 namespace
 {
-    juce::String U (const char* s) { return T (s); }   // os textos que se ven, pola táboa dos idiomas
+    juce::String U (const char* s) { return juce::String::fromUTF8 (s); }
 
     // Algúns envoltorios (CLAP) pasan o texto en UTF-8 coma se fose ASCII: cada byte un
     // carácter («8ª» chega como «8Âª»). Se é así, recomponse.
@@ -70,13 +70,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "ligar", 1 }, U ("Ligar velocidade e transición"), false,
                                                  AudioParameterBoolAttributes().withAutomatable (false)));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "tolerancia", 1 }, U ("Tolerancia"), NormalisableRange<float> (0.0f, 40.0f, 0.1f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? T ("non") : String (roundToInt (v)) + " c"; })));
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? U ("non") : String (roundToInt (v)) + " c"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "toltempo", 1 }, U ("Tolerancia (tempo)"), NormalisableRange<float> (0.0f, 300.0f, 0.0f, 0.5f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? T ("non") : String (roundToInt (v)) + " ms"; })));
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? U ("non") : String (roundToInt (v)) + " ms"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "flexibilidade", 1 }, U ("Flexibilidade"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? T ("non") : String (roundToInt (v)) + " %"; })));
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? U ("non") : String (roundToInt (v)) + " %"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "humanizar", 1 }, U ("Humanizar"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? T ("non") : String (roundToInt (v)) + " %"; })));
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? U ("non") : String (roundToInt (v)) + " %"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibrato", 1 }, U ("Vibrato"), NormalisableRange<float> (0.0f, 200.0f), 100.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })));
     auto pct = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; });
@@ -98,7 +98,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
 
     // aire: alento enriba da voz
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "aire", 1 }, U ("Aire"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? T ("non") : String (roundToInt (v)) + " %"; })));
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? U ("non") : String (roundToInt (v)) + " %"; })));
 
     // MIDI
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "bend_rango", 1 }, U ("Rango do pitch bend"), 1, 24, 2,
@@ -107,7 +107,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
 
     // vibrato xerado
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_fondo", 1 }, U ("Vibrato xerado: fondo"), NormalisableRange<float> (0.0f, 100.0f, 0.1f, 0.6f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? T ("non") : String (roundToInt (v)) + " c"; })));
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? U ("non") : String (roundToInt (v)) + " c"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_velocidade", 1 }, U ("Vibrato xerado: velocidade"), NormalisableRange<float> (2.0f, 10.0f, 0.01f), 5.5f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " Hz"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_retardo", 1 }, U ("Vibrato xerado: retardo"), NormalisableRange<float> (0.0f, 1500.0f, 1.0f, 0.5f), 300.0f,
@@ -115,11 +115,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_variacion", 1 }, U ("Vibrato xerado: variación"), NormalisableRange<float> (0.0f, 100.0f), 30.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_tremolo", 1 }, U ("Vibrato xerado: trémolo"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? T ("non") : String (roundToInt (v)) + " %"; })));
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? U ("non") : String (roundToInt (v)) + " %"; })));
 
     // armonías
-    // (un texto sen díxitos, «non» en calquera idioma, é apagado)
-    auto dbFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v <= -47.9f ? T ("non") : String (v, 1) + " dB"; })
+    // (un texto sen díxitos, «non», é apagado)
+    auto dbFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v <= -47.9f ? U ("non") : String (v, 1) + " dB"; })
                                                  .withValueFromStringFunction ([] (const String& t) { return t.containsAnyOf ("0123456789") ? t.getFloatValue() : -48.0f; });
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "principal", 1 }, U ("Voz principal"), NormalisableRange<float> (-48.0f, 6.0f, 0.1f), 0.0f, dbFmt));
     const StringArray hmodes { U ("Escala"), U ("Acorde MIDI") };
@@ -133,8 +133,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
         l.add (std::make_unique<AudioParameterChoice> (ParameterID { id + "_intervalo", 1 }, nm + U (": intervalo"), TuneProcessor::intervalNames(), defInt[h], choiceAttrs (TuneProcessor::intervalNames())));
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_nivel", 1 }, nm + U (": nivel"), NormalisableRange<float> (-48.0f, 6.0f, 0.1f), -4.0f, dbFmt));
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_pan", 1 }, nm + U (": panorama"), NormalisableRange<float> (-100.0f, 100.0f, 1.0f), defPan[h],
-            // E35 / D35 (esquerda, dereita; noutros idiomas I/D ou L/R) e C no centro
-            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { const int i = roundToInt (v); return i == 0 ? String ("C") : (i < 0 ? T ("E") + String (-i) : T ("D") + String (i)); })
+            // E35 / D35 (esquerda, dereita) e C no centro; tamén le I/L e R
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { const int i = roundToInt (v); return i == 0 ? String ("C") : (i < 0 ? U ("E") + String (-i) : U ("D") + String (i)); })
                                            .withValueFromStringFunction ([] (const String& t)
                                            {
                                                const auto s = t.trim().toUpperCase();
@@ -981,7 +981,7 @@ void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
     params.state.setProperty ("version", stateVersion, nullptr);
     params.state.setProperty ("plugin", BARULLO_VERSION, nullptr);
     params.state.setProperty ("preset", currentPreset, nullptr);
-    params.state.setProperty ("presetName", juce::String::fromUTF8 (presets()[(size_t) juce::jlimit (0, (int) presets().size() - 1, currentPreset)].name), nullptr);   // o nome en galego: igual en todos os idiomas
+    params.state.setProperty ("presetName", juce::String::fromUTF8 (presets()[(size_t) juce::jlimit (0, (int) presets().size() - 1, currentPreset)].name), nullptr);
     params.state.setProperty ("ui", uiScale.load(), nullptr);
     params.state.setProperty ("tab", uiTab.load(), nullptr);
     auto st = params.copyState();

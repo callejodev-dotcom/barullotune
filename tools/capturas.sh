@@ -8,6 +8,6 @@ BIN="${1:-build-dev/BTRenderTest_artefacts/Release/BTRenderTest}"
 mkdir -p docs/img
 names=(correccion voz armonias saida informe)
 for i in 0 1 2 3 4; do
-  BT_LANG=0 "$BIN" --snapshot "docs/img/${names[$i]}.png" "$i" > /dev/null
+  "$BIN" --snapshot "docs/img/${names[$i]}.png" "$i" > /dev/null
   echo "docs/img/${names[$i]}.png"
 done

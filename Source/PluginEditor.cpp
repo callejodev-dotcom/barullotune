@@ -3,7 +3,7 @@
 
 namespace
 {
-    juce::String U (const char* s) { return T (s); }   // todos os textos pasan pola táboa dos idiomas
+    juce::String U (const char* s) { return juce::String::fromUTF8 (s); }
     // números á galega: coma decimal
     juce::String num (double v, int dec) { return juce::String (v, dec).replaceCharacter ('.', ','); }
     bool isBlack (int n) { const int pc = ((n % 12) + 12) % 12; return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10; }
@@ -294,7 +294,7 @@ void Display::paintArc (juce::Graphics& g, juce::Rectangle<float> area)
     if (voiced && target >= 0)
     {
         const auto name = scales::noteName (target);
-        const auto oct = juce::String (lang::octaveOf (target));
+        const auto oct = juce::String (target / 12 - 2);
         const auto big = cond (88.0f), small = cond (34.0f);
         const float wn = juce::GlyphArrangement::getStringWidth (big, name), wo = juce::GlyphArrangement::getStringWidth (small, oct);
         const float x0 = c.x - (wn + wo + 4.0f) * 0.5f;
@@ -371,7 +371,7 @@ void Display::paint (juce::Graphics& g)
     auto r = getLocalBounds().toFloat();
     g.setColour (col::fondo2); g.fillRoundedRectangle (r, 8.0f);
     auto in = r.reduced (18.0f, 16.0f);
-    paintMeter (g, in.removeFromLeft (14.0f), inLv, T ("entrada"));
+    paintMeter (g, in.removeFromLeft (14.0f), inLv, U ("entrada"));
     paintMeter (g, in.removeFromRight (14.0f), outLv, U ("saída"));
     in.reduce (20.0f, 0);
     auto trace = in.removeFromRight (in.getWidth() * 0.42f);
@@ -382,13 +382,13 @@ void Display::paint (juce::Graphics& g)
 // ================================================================ práctica
 PracticePanel::PracticePanel (TuneProcessor& p) : proc (p)
 {
-    reset.setButtonText (T ("Empezar de novo"));
+    reset.setButtonText (U ("Empezar de novo"));
     reset.onClick = [this] { proc.resetPractice(); repaint(); };
-    close.setButtonText (T ("Pechar"));
+    close.setButtonText (U ("Pechar"));
     close.onClick = [this] { if (onClose) onClose(); };
     addAndMakeVisible (reset);
     addAndMakeVisible (close);
-    setTitle (T ("Informe"));
+    setTitle (U ("Informe"));
 }
 
 void PracticePanel::resized()
@@ -404,11 +404,11 @@ void PracticePanel::paint (juce::Graphics& g)
     g.setColour (col::lina); g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
     const auto pr = proc.practice();
     g.setFont (cond (28.0f)); g.setColour (col::escuma);
-    g.drawText (T ("Como afinas"), juce::Rectangle<float> (20.0f, 10.0f, 300.0f, 32.0f), juce::Justification::centredLeft, false);
+    g.drawText (U ("Como afinas"), juce::Rectangle<float> (20.0f, 10.0f, 300.0f, 32.0f), juce::Justification::centredLeft, false);
     if (pr.seconds < 1.0f)
     {
         g.setFont (body (17.0f)); g.setColour (col::neboa);
-        g.drawText (T ("Canta un anaco e aquí verás como afinas (a túa voz, antes de corrixila)."), r.reduced (20.0f, 60.0f), juce::Justification::centredLeft, true);
+        g.drawText (U ("Canta un anaco e aquí verás como afinas (a túa voz, antes de corrixila)."), r.reduced (20.0f, 60.0f), juce::Justification::centredLeft, true);
         return;
     }
     // á esquerda, as cifras
@@ -420,14 +420,14 @@ void PracticePanel::paint (juce::Graphics& g)
         g.drawText (label, juce::Rectangle<float> (130.0f, y + 4.0f, 230.0f, 26.0f), juce::Justification::centredLeft, false);
     };
     const int secs = juce::roundToInt (pr.seconds);
-    stat (52.0f, juce::String (juce::roundToInt (pr.within10 * 100.0f)) + " %", T ("do tempo, a menos de 10 cents"));
-    stat (88.0f, juce::String (juce::roundToInt (pr.within25 * 100.0f)) + " %", T ("a menos de 25 cents"));
-    stat (124.0f, juce::String (juce::roundToInt (pr.meanAbs)) + " c", T ("de desviación media"));
+    stat (52.0f, juce::String (juce::roundToInt (pr.within10 * 100.0f)) + " %", U ("do tempo, a menos de 10 cents"));
+    stat (88.0f, juce::String (juce::roundToInt (pr.within25 * 100.0f)) + " %", U ("a menos de 25 cents"));
+    stat (124.0f, juce::String (juce::roundToInt (pr.meanAbs)) + " c", U ("de desviación media"));
     const int tend = juce::roundToInt (pr.meanSigned);
     stat (160.0f, (tend > 0 ? "+" : tend < 0 ? juce::String::fromUTF8 ("−") : "") + juce::String (std::abs (tend)) + " c",
-          std::abs (tend) < 4 ? T ("centrada") : tend > 0 ? T ("tendes a ir alta") : T ("tendes a ir baixa"));
+          std::abs (tend) < 4 ? U ("centrada") : tend > 0 ? U ("tendes a ir alta") : U ("tendes a ir baixa"));
     g.setFont (body (13.5f)); g.setColour (col::neboa);
-    g.drawText (T ("tempo cantado: ") + juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2),
+    g.drawText (U ("tempo cantado: ") + juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2),
                 juce::Rectangle<float> (20.0f, r.getBottom() - 30.0f, 300.0f, 20.0f), juce::Justification::centredLeft, false);
     // á dereita, unha barra por nota: canto vai alta (arriba) ou baixa (abaixo)
     auto area = juce::Rectangle<float> (380.0f, 52.0f, r.getWidth() - 400.0f, r.getHeight() - 84.0f);
@@ -735,8 +735,7 @@ namespace lay
     // cada pestana centrada
     constexpr int corrW = knobW * 2 + linkW + (knobW * 2) * 3 + gap * 3, corrX = (TuneEditor::W - corrW) / 2;
     constexpr int voiceW = knobW * 3 + knobW * 5 + gap, voiceX = (TuneEditor::W - voiceW) / 2;
-    constexpr int outW = knobW * 3 + gap + knobW + 110 + gap + 150, outX = (TuneEditor::W - outW) / 2;
-    constexpr int langX = outX + knobW * 3 + gap + knobW + 110 + gap;
+    constexpr int outW = knobW * 3 + gap + knobW + 110, outX = (TuneEditor::W - outW) / 2;
 }
 
 void TuneEditor::ArrowButton::paintButton (juce::Graphics& g, bool over, bool down)
@@ -789,9 +788,9 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     canvas.addAndMakeVisible (keyboard);
     canvas.addChildComponent (practicePanel);
     practicePanel.onClose = [this] { practicePanel.setVisible (false); practiceBtn.setVisible (true); };
-    practiceBtn.setButtonText (T ("Informe"));
+    practiceBtn.setButtonText (U ("Informe"));
     practiceBtn.getProperties().set ("fontSize", 13.0f);
-    practiceBtn.setTooltip (T ("Como afinas ti (a voz que entra, sen corrixir): canto tempo estás preto da nota e en que notas tendes a ir alta ou baixa."));
+    practiceBtn.setTooltip (U ("Como afinas ti (a voz que entra, sen corrixir): canto tempo estás preto da nota e en que notas tendes a ir alta ou baixa."));
     practiceBtn.onClick = [this]
     {
         practicePanel.setVisible (true);
@@ -820,7 +819,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
         abBtn[i].onClick = [this, i] { if (i != proc.abCurrent()) proc.abSwitch(); refresh(); };
         canvas.addAndMakeVisible (abBtn[i]);
     }
-    compare.setButtonText (T ("Comparar"));
+    compare.setButtonText (U ("Comparar"));
     compare.setTooltip (U ("Mentres está aceso, escoitas a voz sen afinar (aliñada no tempo, sen armonías) para comparar."));
     compare.onClick = [this] { proc.setParamPlain ("comparar", proc.params.getRawParameterValue ("comparar")->load() > 0.5f ? 0.0f : 1.0f); refresh(); };
     canvas.addAndMakeVisible (compare);
@@ -831,9 +830,9 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     canvas.addAndMakeVisible (undoBtn);
     canvas.addAndMakeVisible (redoBtn);
     // gravar e escoitarse: só na aplicación independente (nun DAW grava o DAW)
-    recBtn.setTitle (T ("Gravar")); playBtn.setTitle (T ("Escoitar"));
-    recBtn.setTooltip (T ("Gravar a saída nun WAV (en Música/Barullo Tune). Volve pulsar para parar."));
-    playBtn.setTooltip (T ("Escoitar a última toma en bucle. Volve pulsar para parar."));
+    recBtn.setTitle (U ("Gravar")); playBtn.setTitle (U ("Escoitar"));
+    recBtn.setTooltip (U ("Gravar a saída nun WAV (en Música/Barullo Tune). Volve pulsar para parar."));
+    playBtn.setTooltip (U ("Escoitar a última toma en bucle. Volve pulsar para parar."));
     recBtn.onClick = [this]
     {
         if (proc.isRecording()) proc.stopRecording();
@@ -892,7 +891,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
                "As notas curtas corríxense coa velocidade de sempre; nas longas, a corrección vaise relaxando e a nota respira.");
     setupKnob (vib, "vibrato", "Vibrato", "Canto vibrato da túa voz pasa á saída: 0 % o aplana, 100 % déixao igual, 200 % dóbrao.");
     setupKnob (cant, "cantidade", "Cantidade", "Canto se corrixe: 100 % leva a voz xusto á nota; 50 % deixa a metade da desafinación.");
-    link.setButtonText (T ("ligar"));
+    link.setButtonText (U ("ligar"));
     link.getProperties().set ("fontSize", 13.0f);
     link.setTooltip (U ("Liga velocidade e transición: ao mover unha, a outra móvese na mesma proporción."));
     link.onClick = [this] { proc.setParamPlain ("ligar", proc.params.getRawParameterValue ("ligar")->load() > 0.5f ? 0.0f : 1.0f); refresh(); };
@@ -954,9 +953,9 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
         comboAtts.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, id + "_intervalo", hInt[h]));
         canvas.addAndMakeVisible (hInt[h]);
         static const char* barNames[5] = { "nivel", "panorama", "desafinar", "atraso", "formantes" };
-        for (int b = 0; b < 5; ++b) setupBar (hBar[h][b], (id + bars[b]).toRawUTF8(), U (barTips[b]), U ("Armonía ") + juce::String (h + 1) + ": " + T (barNames[b]));
+        for (int b = 0; b < 5; ++b) setupBar (hBar[h][b], (id + bars[b]).toRawUTF8(), U (barTips[b]), U ("Armonía ") + juce::String (h + 1) + ": " + U (barNames[b]));
         hOn[h].setTitle (U ("Armonía ") + juce::String (h + 1));
-        hInt[h].setTitle (U ("Armonía ") + juce::String (h + 1) + ": " + T ("intervalo"));
+        hInt[h].setTitle (U ("Armonía ") + juce::String (h + 1) + ": " + U ("intervalo"));
         hBar[h][0].getProperties().set ("fromMin", true);   // o nivel énchese desde a esquerda
     }
 
@@ -971,26 +970,13 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     midiOut.setTooltip (U ("As notas que cantas saen como notas MIDI, para tocar un sintetizador coa voz."));
     buttonAtts.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.params, "midi_saida", midiOut));
     canvas.addAndMakeVisible (midiOut);
-    for (int i = 0; i < lang::count; ++i) language.addItem (juce::String::fromUTF8 (lang::nameOf ((lang::Id) i)), i + 1);
-    language.setSelectedId ((int) lang::current() + 1, juce::dontSendNotification);
-    language.setTitle (T ("Idioma"));
-    language.setTooltip (T ("O idioma da interface e dos nomes dos parámetros."));
-    language.onChange = [this]
-    {
-        const int id = language.getSelectedId() - 1;
-        if (id < 0 || id == (int) lang::current()) return;
-        lang::set ((lang::Id) id);
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, T ("Idioma"),
-            T ("O idioma cambia ao pechar e volver abrir a xanela; os nomes dos parámetros, ao volver cargar o plugin."));
-    };
-    canvas.addAndMakeVisible (language);
 
     // ---- modo, tonalidade, voz e afinación
     for (int i = 0; i < 12; ++i) tonica.addItem (scales::noteName (i), i + 1);
     for (int i = 0; i < (int) scales::all().size(); ++i) escala.addItem (U (scales::all()[(size_t) i].name), i + 1);
     const char* voces[] = { "Baixo", "Barítono", "Tenor", "Alto", "Mezzo", "Soprano", "Calquera" };
     for (int i = 0; i < 7; ++i) voz.addItem (U (voces[i]), i + 1);
-    afin.addItem (T ("Igual"), 1); afin.addItem (T ("Xusta"), 2); afin.addItem (T ("Personalizada"), 3); afin.addItem ("MTS-ESP", 4);
+    afin.addItem (U ("Igual"), 1); afin.addItem (U ("Xusta"), 2); afin.addItem (U ("Personalizada"), 3); afin.addItem ("MTS-ESP", 4);
     tonicaAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, "tonica", tonica);
     escalaAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, "escala", escala);
     vozAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, "rango", voz);
@@ -1007,7 +993,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     scl.onClick = [this] { importScala(); };
     canvas.addAndMakeVisible (scl);
 
-    detect.setButtonText (T ("Detectar"));
+    detect.setButtonText (U ("Detectar"));
     detect.setTooltip (U ("Canta uns segundos (ou pon a base na entrada lateral «Acompañamento»): Barullo Tune escoita e escolle a tónica e a escala. Volve pulsar para cancelar."));
     detect.onClick = [this] { if (proc.isKeyListening()) proc.stopKeyListening(); else proc.startKeyListening(); refresh(); };
     canvas.addAndMakeVisible (detect);
@@ -1111,7 +1097,6 @@ void TuneEditor::showTab (int t)
     }
     for (auto* k : { &la, &mest, &vol, &bend }) k->setVisible (o);
     midiOut.setVisible (o);
-    language.setVisible (o);
     for (int i = 0; i < numTabs; ++i) tabBtn[i].setToggleState (i == tab, juce::dontSendNotification);
     canvas.repaint();
 }
@@ -1156,8 +1141,8 @@ void TuneEditor::presetChosen()
     {
         auto* w = new juce::AlertWindow (U ("Gardar preset"), U ("Nome do preset (garda todos os axustes):"), juce::MessageBoxIconType::NoIcon);
         w->addTextEditor ("nome", "", "");
-        w->addButton (T ("Gardar"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-        w->addButton (T ("Cancelar"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        w->addButton (U ("Gardar"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        w->addButton (U ("Cancelar"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
         w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int r)
         {
             if (r == 1 && proc.saveUserPreset (w->getTextEditorContents ("nome"))) rebuildPresetMenu();
@@ -1222,7 +1207,7 @@ void TuneEditor::refresh()
     }
     else
     {
-        detect.setButtonText (T ("Detectar"));
+        detect.setButtonText (U ("Detectar"));
         detect.getProperties().set ("progress", 0.0f);
     }
     detect.repaint();
@@ -1279,15 +1264,15 @@ void TuneEditor::paintCanvas (juce::Graphics& g)
     if (tab == TabCorrection)
     {
         int x = corrX;
-        group (x, knobW * 2 + linkW, T ("Afinar")); x += knobW * 2 + linkW + gap;
-        group (x, knobW * 2, T ("Tolerancia")); x += knobW * 2 + gap;
-        group (x, knobW * 2, T ("Liberdade")); x += knobW * 2 + gap;
-        group (x, knobW * 2, T ("Voz"));
+        group (x, knobW * 2 + linkW, U ("Afinar")); x += knobW * 2 + linkW + gap;
+        group (x, knobW * 2, U ("Tolerancia")); x += knobW * 2 + gap;
+        group (x, knobW * 2, U ("Liberdade")); x += knobW * 2 + gap;
+        group (x, knobW * 2, U ("Voz"));
     }
     else if (tab == TabVoice)
     {
-        group (voiceX, knobW * 3, T ("Timbre"));
-        group (voiceX + knobW * 3 + gap, knobW * 5, T ("Vibrato xerado"));
+        group (voiceX, knobW * 3, U ("Timbre"));
+        group (voiceX + knobW * 3 + gap, knobW * 5, U ("Vibrato xerado"));
     }
     else if (tab == TabHarmony)
     {
@@ -1296,13 +1281,12 @@ void TuneEditor::paintCanvas (juce::Graphics& g)
         g.drawText (U ("intervalo"), juce::Rectangle<int> (hX + 40, rowY - 2, 120, 16), juce::Justification::centred, false);
         const char* heads[5] = { "nivel", "panorama", "desafinar", "atraso", "formantes" };
         for (int b = 0; b < 5; ++b)
-            g.drawText (T (heads[b]), juce::Rectangle<int> (hBarX + b * hBarStep, rowY - 2, hBarW, 16), juce::Justification::centred, false);
+            g.drawText (U (heads[b]), juce::Rectangle<int> (hBarX + b * hBarStep, rowY - 2, hBarW, 16), juce::Justification::centred, false);
     }
     else
     {
         group (outX, knobW * 3, U ("Saída"));
         group (outX + knobW * 3 + gap, knobW + 110, "MIDI");
-        group (langX, 150, T ("Idioma"));
     }
 
     // lenda do teclado, no pé
@@ -1311,8 +1295,8 @@ void TuneEditor::paintCanvas (juce::Graphics& g)
         g.setColour (c); g.fillRoundedRectangle ((float) x, (float) kbY + kbH + 10.0f, 14.0f, 10.0f, 2.0f);
         small (t, { x + 19, kbY + kbH + 7, 60, 16 });
     };
-    swatch (28, col::escuma, T ("escala"));
-    swatch (92, col::sodio, T ("libre"));
+    swatch (28, col::escuma, U ("escala"));
+    swatch (92, col::sodio, U ("libre"));
     swatch (148, col::lina, U ("fóra"));
     small (U ("clic dereito nun mando: escribir o valor · maiúsculas: fino, ou os cents da tecla"), { 210, kbY + kbH + 7, 490, 16 });
 
@@ -1387,7 +1371,6 @@ void TuneEditor::layout()
         x += gap;
         bend.setBounds (x, knobY, knobW, knobH);
         midiOut.setBounds (x + knobW + 6, knobY + 26, 98, 30);
-        language.setBounds (langX + 10, knobY + 26, 130, 30);
     }
 
     // modo, tonalidade, voz, afinación e o teclado

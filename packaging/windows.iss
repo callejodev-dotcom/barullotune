@@ -29,15 +29,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 WizardStyle=modern
 UninstallDisplayName=Barullo Tune
-; o idioma do instalador: galego de primeiras (aínda que Windows estea noutro), e pódese escoller
-LanguageDetectionMethod=none
-ShowLanguageDialog=yes
+ShowLanguageDialog=no
 
 [Languages]
-; o galego primeiro (tradución non oficial de Inno Setup, de MdL: packaging/Galician.isl)
+; en galego (tradución non oficial de Inno Setup, de MdL: packaging/Galician.isl)
 Name: "gl"; MessagesFile: "Galician.isl"
-Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
-Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Types]
 Name: "full"; Description: "Todo (VST3, CLAP e aplicación)"

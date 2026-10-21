@@ -5,7 +5,6 @@
 #include <array>
 #include <atomic>
 #include "tune/Engine.h"
-#include "lang/Lang.h"
 
 namespace scales
 {
@@ -46,9 +45,13 @@ namespace scales
         static const double c[12] = { 0.0, 11.73, 3.91, 15.64, -13.69, -1.96, -9.78, 1.96, 13.69, -15.64, 17.60, -11.73 };
         return c[((degree % 12) + 12) % 12];
     }
-    inline juce::String noteName (int pc) { return lang::noteName (pc); }
-    // nome con oitava (Do central = Do3, coma nos outros Barullos; en inglés, C4)
-    inline juce::String noteWithOctave (int midi) { return noteName (midi) + juce::String (lang::octaveOf (midi)); }
+    inline juce::String noteName (int pc)
+    {
+        static const char* n[12] = { "Do", "Do♯", "Re", "Mi♭", "Mi", "Fa", "Fa♯", "Sol", "La♭", "La", "Si♭", "Si" };
+        return juce::String::fromUTF8 (n[((pc % 12) + 12) % 12]);
+    }
+    // nome con oitava (Do central = Do3, coma nos outros Barullos)
+    inline juce::String noteWithOctave (int midi) { return noteName (midi) + juce::String (midi / 12 - 2); }
     inline uint16_t rotate (uint16_t rel, int key) { key = ((key % 12) + 12) % 12; return (uint16_t) (((rel << key) | (rel >> (12 - key))) & 0x0FFF); }
 
     // tonalidade a partir dun histograma de clases de altura (perfís de Krumhansl–Kessler).

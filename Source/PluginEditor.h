@@ -80,7 +80,7 @@ namespace ui
     class Keyboard : public juce::Component, public juce::TooltipClient
     {
     public:
-        explicit Keyboard (TuneProcessor& p) : proc (p) { setWantsKeyboardFocus (true); setTitle (T ("Teclado da escala")); }
+        explicit Keyboard (TuneProcessor& p) : proc (p) { setWantsKeyboardFocus (true); setTitle (juce::String::fromUTF8 ("Teclado da escala")); }
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDrag (const juce::MouseEvent&) override;
@@ -215,7 +215,6 @@ private:
     // saída
     ui::Knob la, mest, vol, bend;
     juce::TextButton midiOut;
-    juce::ComboBox language;
     // modo, tonalidade, voz e afinación
     juce::ComboBox tonica, escala, voz, afin;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt, vozAtt, afinAtt;

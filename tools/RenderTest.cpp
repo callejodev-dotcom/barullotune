@@ -306,8 +306,6 @@ static void writeJson (const juce::File& f)
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    lang::setForTesting (lang::gl);   // as probas, en galego (non no idioma da máquina)
-    if (const char* l = std::getenv ("BT_LANG")) lang::setForTesting ((lang::Id) juce::jlimit (0, (int) lang::count - 1, juce::String (l).getIntValue()));
     if (argc > 3 && juce::String (argv[1]) == "--file") return processFile (argc, argv);
     if (argc > 1 && juce::String (argv[1]) == "--cpu") { cpuBench (20.0); return 0; }
     // --snapshot captura.png [pestana 0–3]
@@ -1257,31 +1255,6 @@ int main (int argc, char** argv)
         for (auto* c : ed->getChildren()) for (auto* cc : c->getChildren()) if (cc->getTitle().startsWith ("Afinador")) dispTitle = cc->getTitle();
         std::printf ("accesibilidade: escribir %d%d%d%d, teclado %d%d%d («%s»), pantalla «%s»\n", t1, t2, t3, t4, k1, k2, k3, kb.getTitle().toRawUTF8(), dispTitle.toRawUTF8());
         check ("accesibilidade: escribir valores, teclado sen rato e a nota anunciada", t1 && t2 && t3 && t4 && k1 && k2 && k3 && dispTitle.contains ("Do3"));
-    }
-
-    // idiomas: en cada un, os nomes saen traducidos, o editor ábrese e o texto <-> valor
-    // de todos os parámetros vai e volve
-    {
-        int bad = 0; juce::String first;
-        const char* wantVel[lang::count] = { "Velocidade", "Velocidad", "Speed", "Velocidade", "Velocitat", "Abiadura" };
-        for (int l = 0; l < lang::count; ++l)
-        {
-            lang::setForTesting ((lang::Id) l);
-            TuneProcessor p;
-            const auto vname = p.params.getParameter ("velocidade")->getName (64);
-            if (vname != juce::String::fromUTF8 (wantVel[l])) { if (bad++ == 0) first = juce::String (lang::nameOf ((lang::Id) l)) + ": " + vname; }
-            for (auto* prm : p.getParameters())
-                for (int k = 0; k <= 10; ++k)
-                {
-                    const auto t1 = prm->getText ((float) k / 10.0f, 64);
-                    if (prm->getText (prm->getValueForText (t1), 64) != t1) { if (bad++ == 0) first = juce::String (lang::nameOf ((lang::Id) l)) + ": " + prm->getName (64) + " " + t1; }
-                }
-            std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
-            if (ed == nullptr) ++bad;
-        }
-        lang::setForTesting (lang::gl);
-        std::printf ("idiomas: %d problemas%s%s\n", bad, bad ? " (" : "", bad ? (first + ")").toRawUTF8() : "");
-        check ("idiomas: nomes traducidos, editor e texto <-> valor nos seis", bad == 0);
     }
 
     // texto <-> valor de todos os parámetros (coma o comproba clap-validator): o texto dun

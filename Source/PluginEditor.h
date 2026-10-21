@@ -34,6 +34,7 @@ namespace ui
         void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
         juce::Font getComboBoxFont (juce::ComboBox&) override { return semi (16.0f); }
         juce::Font getPopupMenuFont() override { return body (16.0f); }
+        void drawLinearSlider (juce::Graphics&, int x, int y, int w, int h, float pos, float minPos, float maxPos, juce::Slider::SliderStyle, juce::Slider&) override;
         void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
         void drawPopupMenuBackground (juce::Graphics&, int w, int h) override;
     };
@@ -59,13 +60,15 @@ namespace ui
         float inLv = 0, outLv = 0;
     };
 
-    // o teclado: unha tira enriba de cada tecla di se a nota está na escala, fóra ou libre
+    // o teclado: unha tira enriba de cada tecla di se a nota está na escala, fóra ou libre.
+    // Coa afinación Personalizada, maiúsculas + arrastrar en vertical cambia os cents da nota
     class Keyboard : public juce::Component, public juce::TooltipClient
     {
     public:
         explicit Keyboard (TuneProcessor& p) : proc (p) {}
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
         void mouseMove (const juce::MouseEvent&) override;
         void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
         juce::String getTooltip() override;
@@ -74,8 +77,10 @@ namespace ui
     private:
         int noteAt (juce::Point<float>) const;
         juce::Rectangle<float> keyRect (int note) const;
+        bool customTuning() const;
         TuneProcessor& proc;
-        int hover = -1;
+        int hover = -1, dragPc = -1;
+        float dragStartCents = 0;
     };
 
     struct Knob : public juce::Component
@@ -96,8 +101,11 @@ public:
     ~TuneEditor() override;
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;   // (global) cada xesto, un paso de desfacer
     void tick() { timerCallback(); }   // para as probas
-    static constexpr int W = 1040, H = 664;
+    void showTab (int t);              // para as probas
+    static constexpr int W = 1040, H = 692;
+    enum Tab { TabCorrection = 0, TabVoice, TabHarmony, TabOutput, numTabs };
 
 private:
     // todo vai debuxado a tamaño fixo nun lenzo que despois se escala co tamaño da xanela
@@ -106,13 +114,24 @@ private:
         std::function<void (juce::Graphics&)> painter;
         void paint (juce::Graphics& g) override { if (painter) painter (g); }
     };
+    // botón de desfacer / refacer (unha frecha en arco)
+    struct ArrowButton : juce::Button
+    {
+        ArrowButton (bool redo) : juce::Button (redo ? "refacer" : "desfacer"), isRedo (redo) {}
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+        bool isRedo;
+    };
 
     void timerCallback() override;
     void paintCanvas (juce::Graphics&);
     void layout();
     void setupKnob (ui::Knob&, const char* id, const char* name, const char* tip);
     void setupSegment (juce::TextButton* b, int count, const char* paramId, const char* const* names, const char* const* tips);
+    void setupBar (juce::Slider&, const char* id, const juce::String& tip);
     void refresh();
+    void rebuildPresetMenu();
+    void presetChosen();
+    void importScala();
 
     TuneProcessor& proc;
     ui::Look look;
@@ -122,13 +141,38 @@ private:
     ui::Display display { proc };
     ui::Keyboard keyboard { proc };
 
-    juce::ComboBox preset, tonica, escala, voz;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt, vozAtt;
-    juce::TextButton detect, link, compare;
-    juce::TextButton modeBtn[3], calBtn[3];
-
-    ui::Knob vel, transi, tol, tolT, vib, cant, form, trans, la, mest, vol;
+    // cabeceira
+    juce::ComboBox preset;
+    juce::TextButton abBtn[2], compare;
+    ArrowButton undoBtn { false }, redoBtn { true };
+    juce::TextButton calBtn[3];
+    // pestanas
+    juce::TextButton tabBtn[numTabs];
+    int tab = TabCorrection;
+    // corrección
+    ui::Knob vel, transi, tol, tolT, flex, human, vib, cant;
+    juce::TextButton link;
     float lastVel = -1, lastTransi = -1;
+    // voz
+    ui::Knob form, trans, air, vgDepth, vgRate, vgDelay, vgVar, vgTrem;
+    // armonías
+    ui::Knob principal;
+    juce::TextButton harmMode[2];
+    juce::TextButton hOn[TuneProcessor::numHarmonies];
+    juce::ComboBox hInt[TuneProcessor::numHarmonies];
+    juce::Slider hBar[TuneProcessor::numHarmonies][5];
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> buttonAtts;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> comboAtts;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sliderAtts;
+    // saída
+    ui::Knob la, mest, vol, bend;
+    juce::TextButton midiOut;
+    // modo, tonalidade, voz e afinación
+    juce::ComboBox tonica, escala, voz, afin;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt, vozAtt, afinAtt;
+    juce::TextButton detect, scl, modeBtn[3];
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::String lastPresetList;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TuneEditor)
 };

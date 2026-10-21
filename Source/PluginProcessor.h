@@ -239,6 +239,7 @@ private:
     void applyParams (const juce::ValueTree& snap);
 public:
     std::atomic<float> uiScale { 1.0f };   // tamaño da xanela (gárdase co proxecto)
+    std::atomic<int> uiTab { 0 };          // a pestana aberta (tamén)
 private:
 
     std::atomic<bool> keyListening { false };

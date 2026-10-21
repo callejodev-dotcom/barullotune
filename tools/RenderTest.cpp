@@ -193,7 +193,7 @@ static void writeWav (const juce::File& f, const juce::AudioBuffer<float>& b)
         }
 }
 
-static void snapshot (const juce::File& png)
+static void snapshot (const juce::File& png, int tab)
 {
     std::vector<double> truth;
     const auto voice = makeVoice (truth);
@@ -201,8 +201,10 @@ static void snapshot (const juce::File& png)
     p.setPlayConfigDetails (2, 2, SR, 512);
     p.prepareToPlay (SR, 512);
     setP (p, "velocidade", 30);
+    setP (p, "harm1", 1); setP (p, "harm2", 1); setP (p, "flexibilidade", 20); setP (p, "vibgen_fondo", 18);
     std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
     auto* te = dynamic_cast<TuneEditor*> (ed.get());
+    te->showTab (tab);
     juce::AudioBuffer<float> buf (2, 512);
     const int stop = (int) (SR * 4.6);
     for (int pos = 0; pos + 512 <= stop; pos += 512)
@@ -305,7 +307,8 @@ int main (int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 3 && juce::String (argv[1]) == "--file") return processFile (argc, argv);
     if (argc > 1 && juce::String (argv[1]) == "--cpu") { cpuBench (20.0); return 0; }
-    if (argc > 2 && juce::String (argv[1]) == "--snapshot") { snapshot (juce::File { juce::String (argv[2]) }); return 0; }
+    // --snapshot captura.png [pestana 0–3]
+    if (argc > 2 && juce::String (argv[1]) == "--snapshot") { snapshot (juce::File { juce::String (argv[2]) }, argc > 3 ? juce::String (argv[3]).getIntValue() : 0); return 0; }
     // BTRenderTest [saida.wav] [--json metricas.json]
     juce::String wavOut, jsonOut;
     for (int a = 1; a < argc; ++a)

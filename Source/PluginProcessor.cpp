@@ -784,6 +784,7 @@ void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
     params.state.setProperty ("preset", currentPreset, nullptr);
     params.state.setProperty ("presetName", getProgramName (currentPreset), nullptr);
     params.state.setProperty ("ui", uiScale.load(), nullptr);
+    params.state.setProperty ("tab", uiTab.load(), nullptr);
     auto st = params.copyState();
     if (auto xml = st.createXml()) copyXmlToBinary (*xml, dest);
 }
@@ -830,6 +831,7 @@ void TuneProcessor::setStateInformation (const void* data, int size)
         if (getProgramName (i) == name) pr = i;
     currentPreset = juce::jlimit (0, (int) presets().size() - 1, pr);
     uiScale = juce::jlimit (0.75f, 1.5f, (float) (double) st.getProperty ("ui", 1.0));
+    uiTab = juce::jlimit (0, 3, (int) st.getProperty ("tab", 0));
 }
 
 juce::AudioProcessorEditor* TuneProcessor::createEditor() { return new TuneEditor (*this); }

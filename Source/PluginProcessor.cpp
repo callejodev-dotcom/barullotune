@@ -222,11 +222,12 @@ TuneProcessor::TuneProcessor()
 void TuneProcessor::applyEngineSettings()
 {
     const int q = juce::jlimit (0, 2, (int) pCal->load()), r = juce::jlimit (0, (int) tune::Engine::numRanges - 1, (int) pRango->load());
-    if (q != engine.currentQuality() || r != engine.currentRange() || latencyNow.load() != engine.latency())
+    if (q != engine.currentQuality() || r != engine.currentRange() || latencyNow.load() != engine.reportedLatency())
     {
         if (latencyNow.load() < 0) engine.configure (q, r);   // ao preparar: de cero
         else engine.switchTo (q, r);                         // en marcha: a análise segue
-        latencyNow = engine.latency();
+        latencyNow = engine.reportedLatency();
+        realLatency = engine.latency();
         triggerAsyncUpdate();
     }
 }

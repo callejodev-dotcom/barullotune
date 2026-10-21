@@ -229,7 +229,9 @@ public:
     static juce::File takesFolder();
 
     // latencia actual en ms (para amosala)
-    float latencyMs() const { return (float) (1000.0 * latencyNow.load() / juce::jmax (1.0, getSampleRate())); }
+    // o atraso de verdade (en Directo declárase 0 ao DAW, pero quedan 0,25 ms)
+    float latencyMs() const { return (float) (1000.0 * realLatency.load() / juce::jmax (1.0, getSampleRate())); }
+    int realLatencySamples() const { return realLatency.load(); }
 
     // para a interface: historia do ton (unha trama cada 256 mostras)
     struct Frame { float inMidi, outMidi; int16_t target; uint8_t voiced; };
@@ -262,7 +264,7 @@ private:
     int switchState = 0;   // 0 nada, −1 baixando, +1 subindo
     int frameCount = 0;
     float levelAcc = 0, outAcc = 0;
-    std::atomic<int> latencyNow { 0 };
+    std::atomic<int> latencyNow { 0 }, realLatency { 0 };
     int currentPreset = 0;
     int abSlot = 0;
     juce::ValueTree abState[2];

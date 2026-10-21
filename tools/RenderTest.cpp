@@ -2,6 +2,7 @@
 // a afinación da saída. Tamén: independencia do tamaño de bloque, mono, MIDI,
 // estado gardado e (con --snapshot) unha captura da interface.
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_dsp/juce_dsp.h>
 #include <random>
 #include "Aleatorio.h"
 #include <map>
@@ -155,7 +156,7 @@ static juce::AudioBuffer<float> run (const std::vector<float>& voice, int block,
     p.setPlayConfigDetails (channels, channels, SR, block);
     setup (p);
     p.prepareToPlay (SR, block);
-    lat = p.getLatencySamples();
+    lat = p.realLatencySamples();
     const int total = (int) voice.size() + lat;
     juce::AudioBuffer<float> out (channels, total), buf (channels, block);
     size_t k = 0;
@@ -241,7 +242,7 @@ static int processFile (int argc, char** argv)
         setP (p, kv.upToFirstOccurrenceOf ("=", false, false).toRawUTF8(), kv.fromFirstOccurrenceOf ("=", false, false).getFloatValue());
     }
     p.prepareToPlay (sr, 512);
-    const int lat = p.getLatencySamples(), total = len + lat;
+    const int lat = p.realLatencySamples(), total = len + lat;
     juce::AudioBuffer<float> out (1, len), buf (1, 512);
     for (int pos = 0; pos < total; pos += 512)
     {
@@ -344,8 +345,14 @@ int main (int argc, char** argv)
         metric (M + ".robot.cents", s.outC); metric (M + ".robot.fora", s.wrong); metric (M + ".latencia.ms", 1000.0 * lat / SR);
         check (q == 0 ? "directo robot: menos de 3 cents de media" : q == 1 ? "preciso robot: menos de 3 cents de media" : "estudio robot: menos de 3 cents de media",
                s.outC < 3.0 && s.wrong < s.frames / 30 + 2);
-        if (q == 0) check ("directo: latencia de menos de 1 ms", lat < SR * 0.001);
+        if (q == 0) check ("directo: atraso de menos de 0,3 ms", lat < SR * 0.0003);
         if (q == 1) check ("preciso: latencia de menos de 13 ms", lat < SR * 0.013);
+        // ao DAW: Directo declara 0 (o que queda é o mínimo do interpolador); os outros, o seu atraso
+        {
+            TuneProcessor d; d.setPlayConfigDetails (2, 2, SR, 512); setq (d); d.prepareToPlay (SR, 512);
+            const bool declared = q == 0 ? d.getLatencySamples() == 0 : d.getLatencySamples() == d.realLatencySamples();
+            check (q == 0 ? "directo: ao DAW declara 0 mostras" : q == 1 ? "preciso: ao DAW declara o seu atraso" : "estudio: ao DAW declara o seu atraso", declared);
+        }
 
         // natural
         auto nt = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 60); setP (p, "transicion", 120); }, lat);
@@ -468,6 +475,61 @@ int main (int argc, char** argv)
             metric (M + ".tremor.cents", rout);
             const double lim = q == 0 ? 2.5 : 1.5;   // antes do ton deslizante: directo 6,0 c, preciso 1,8 c
             check (q == 0 ? "directo: vibrato rápido aplanado (menos de 2,5 c)" : q == 1 ? "preciso: vibrato rápido aplanado (menos de 1,5 c)" : "estudio: vibrato rápido aplanado (menos de 1,5 c)", rout < lim);
+        }
+
+        // empalmes: unha nota firme e limpa, en robot. A saída ten que ser periódica de todo,
+        // así que o que haxa entre os harmónicos é ruído dos saltos de ciclo (cando a lectura
+        // alcanza a escritura ou queda atrás). Saltos para atrás e para adiante, pequenos e
+        // grandes: desafinada 45 c (corrixe), transpor ±3 (salta a cada pouco) e ±12 (a lectura
+        // corre o dobre ou a metade). A medida: ruído/harmónicos en amplitude, en milésimas
+        {
+            struct Caso { const char* id; double cents; float transpose; };
+            const Caso casos[] = { { "afinada", 0, 0 }, { "alta45", 45, 0 }, { "baixa45", -45, 0 }, { "subir3", 0, 3 }, { "baixar3", 0, -3 }, { "subir12", 0, 12 }, { "baixar12", 0, -12 } };
+            constexpr int order = 15, N = 1 << order;
+            juce::dsp::FFT fft (order);
+            std::string line;
+            double worst = 0;
+            for (const auto& cs : casos)
+            {
+                const double fin = 220.0 * std::pow (2.0, cs.cents / 1200.0), fo = 220.0 * std::pow (2.0, cs.transpose / 12.0);
+                std::vector<float> vs ((size_t) (1.6 * SR));
+                double ph = 0;
+                for (size_t i = 0; i < vs.size(); ++i)
+                {
+                    const double tt = (double) i / SR;
+                    ph += fin / SR;
+                    double sm = 0;
+                    for (int h = 1; h <= 30; ++h) sm += envAt (VA, h * fin) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                    vs[i] = (float) (0.1 * sm * std::min (1.0, tt / 0.03));
+                }
+                int le = 0;
+                auto eo = run (vs, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "transpor", cs.transpose); }, le);
+                std::vector<float> fb ((size_t) (2 * N), 0.0f);
+                const int start = (int) (0.6 * SR) + le;
+                for (int i = 0; i < N; ++i)
+                {
+                    // Blackman-Harris: os lóbulos laterais (−92 dB) non tapan o ruído
+                    const double a = 2 * juce::MathConstants<double>::pi * (i + 0.5) / N;
+                    const double w = 0.35875 - 0.48829 * std::cos (a) + 0.14128 * std::cos (2 * a) - 0.01168 * std::cos (3 * a);
+                    fb[(size_t) i] = (float) (w * eo.getSample (0, start + i));
+                }
+                fft.performFrequencyOnlyForwardTransform (fb.data());
+                const double binHz = SR / N;
+                double eh = 1e-30, en = 1e-30;
+                for (int b = (int) (80.0 / binHz); b <= (int) (15000.0 / binHz); ++b)
+                {
+                    const double f = b * binHz, k = std::max (1.0, std::round (f / fo));
+                    const double e = (double) fb[(size_t) b] * fb[(size_t) b];
+                    if (std::abs (f - k * fo) <= 6.0 * binHz) eh += e; else en += e;
+                }
+                const double mil = 1000.0 * std::sqrt (en / eh);
+                metric (M + ".empalmes." + cs.id, mil);
+                worst = std::max (worst, mil);
+                line += juce::String::formatted (" %s %.0f dB", cs.id, 20.0 * std::log10 (mil / 1000.0)).toStdString();
+            }
+            std::printf ("empalmes, ruído entre harmónicos:%s\n", line.c_str());
+            // −40 dB: un empalme que rasque soa moito antes
+            check (q == 0 ? "directo: empalmes limpos" : q == 1 ? "preciso: empalmes limpos" : "estudio: empalmes limpos", worst < 10.0);
         }
 
         // glisandos (efecto robot, cromática): a saída ten que ir en escaleira detrás da voz,
@@ -598,7 +660,7 @@ int main (int argc, char** argv)
         // a canle dereita debe ser a esquerda corrixida igual: medímolo co mesmo atraso e ganancia
         double el = 0, er = 0;
         for (int i = (int) SR; i < total - dl; ++i) { el += outL.getSample (0, i) * outL.getSample (0, i); er += outR.getSample (0, i + dl) * outR.getSample (0, i + dl); }
-        int lat2 = p.getLatencySamples();
+        int lat2 = p.realLatencySamples();
         auto sl = evaluate (outL, lat2, truth, 0);
         std::printf ("estéreo %s: esquerda %.1f c, nivel dereita/esquerda %.3f (agardado 0,600)\n", q == 0 ? "directo" : "estudio", sl.outC, std::sqrt (er / el));
         metric (std::string (q == 0 ? "directo" : "estudio") + ".estereo.cents", sl.outC);
@@ -656,7 +718,7 @@ int main (int argc, char** argv)
         p.setPlayConfigDetails (2, 2, SR, 512);
         setP (p, "modo", 2); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
         p.prepareToPlay (SR, 512);
-        const int lb = p.getLatencySamples(), total = (int) voice.size() + lb;
+        const int lb = p.realLatencySamples(), total = (int) voice.size() + lb;
         juce::AudioBuffer<float> out (2, total), buf (2, 512);
         size_t k = 0;
         for (int pos = 0; pos < total; pos += 512)
@@ -967,10 +1029,10 @@ int main (int argc, char** argv)
             for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) ((blk * 512 + i) % (int) voice.size())]);
             juce::MidiBuffer m; p.processBlock (buf, m);
             for (int i = 0; i < 512; ++i) finite &= std::isfinite (buf.getSample (0, i));
-            if (blk == 100) { p.flushLatencyUpdate(); std::printf ("latencia en estudio: %d mostras\n", p.getLatencySamples()); finite &= p.getLatencySamples() > 1000; }
+            if (blk == 100) { p.flushLatencyUpdate(); std::printf ("latencia en estudio: %d mostras\n", p.realLatencySamples()); finite &= p.realLatencySamples() > 1000; }
         }
         p.flushLatencyUpdate();
-        check ("cambio de xeito en marcha", finite && p.getLatencySamples() < 48);
+        check ("cambio de xeito en marcha", finite && p.realLatencySamples() < 48);
     }
 
     // cambio de xeito sen estalo: a saída baixa en 5 ms, cámbiase e volve subir; a análise
@@ -1326,7 +1388,7 @@ int main (int argc, char** argv)
         p.setPlayConfigDetails (2, 2, SR, 256);
         setP (p, "calidade", (float) q);
         p.prepareToPlay (SR, 256);
-        const int lh = p.getLatencySamples(), total = (int) voice.size() + lh;
+        const int lh = p.realLatencySamples(), total = (int) voice.size() + lh;
         juce::AudioBuffer<float> buf (2, 256);
         float dh = 0;
         for (int pos = 0; pos < total; pos += 256)
@@ -1439,7 +1501,7 @@ int main (int argc, char** argv)
                 for (int h = 1; h <= 30; ++h) sm += envAt (VA, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
                 e4[i] = (float) (0.1 * sm * std::min (1.0, (double) i / (0.03 * SR)));
             }
-            const int lt = p.getLatencySamples();
+            const int lt = p.realLatencySamples();
             juce::AudioBuffer<float> buf (1, 512), out (1, (int) e4.size() + lt);
             for (int pos = 0; pos < (int) e4.size(); pos += 512)
             {
@@ -1507,7 +1569,7 @@ int main (int argc, char** argv)
             p.setPlayConfigDetails (1, 1, SR, 512);
             setP (p, "calidade", 2); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "afinacion", 3);
             p.prepareToPlay (SR, 512);
-            const int lt = p.getLatencySamples();
+            const int lt = p.realLatencySamples();
             juce::AudioBuffer<float> buf (1, 512), out (1, (int) e4.size() + lt);
             const juce::uint8 sx[] = { 0xF0, 0x7F, 0x7F, 0x08, 0x02, 0x00, 0x01, 64, 63, 96, 0, 0xF7 };
             for (int pos = 0; pos < (int) e4.size(); pos += 512)

@@ -20,11 +20,11 @@ Arriba á dereita:
 
 | Xeito | Latencia | Para que |
 |---|---|---|
-| **Directo** | menos de 1 ms | cantar en directo escoitándote |
+| **Directo** | 0 para o DAW (0,25 ms de verdade) | cantar en directo escoitándote |
 | **Preciso** | 12 ms | gravar, ou directo se non che molesta un pouco de atraso; afina o dobre de exacto ca Directo |
 | **Estudio** | 15–42 ms (segundo o tipo de voz) | mesturar: o máis exacto e o mellor son ao transpor moito |
 
-O DAW compensa a latencia ao reproducir. Cambiar de xeito en marcha non fai estalo.
+O DAW compensa a latencia ao reproducir. Directo declara 0, así que non atrasa as outras pistas. Cambiar de xeito en marcha non fai estalo.
 
 ## A pantalla
 

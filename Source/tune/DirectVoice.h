@@ -23,7 +23,12 @@ public:
         decider.prepare (sr);
         decHop = std::max (1, (int) std::lround (0.004 * sr));
         xfade = std::max (16, (int) std::lround (sr * 0.0006));
-        dMin = (int) std::ceil (1.1 * xfade) + 4 + Sinc::half;   // o interpolador mira 8 mostras adiante
+        // atraso mínimo da lectura: o interpolador mira 8 mostras adiante, e 4 de marxe
+        dMin = Sinc::half + 4;
+        // marxe para o fundido dun salto cara atrás: mentres funde, a lectura vella aínda se
+        // adianta (rho − 1)·fundido mostras e non pode pasar a escritura. Enteira só fai falta
+        // ao subir unha oitava
+        xfGuard = (int) std::ceil (1.1 * xfade);
         ffix.prepare (sr);
         ffixAlpha = 1.0 - std::exp (-1.0 / (0.02 * sr));
         ffixAlphaFast = 1.0 - std::exp (-1.0 / (0.005 * sr));
@@ -36,8 +41,10 @@ public:
         lookAhead = 0.0004 * sr;
     }
 
-    // preciso: a lectura vai 11,5 ms detrás, dentro de ciclos xa medidos (sen extrapolar)
-    void configure (bool isPrecise) { precise = isPrecise; dLead = precise ? dMin + (int) std::lround (0.0115 * sr) : dMin; }
+    // Directo: a lectura vai a 12 mostras (0,25 ms) e, ao subir o ton, a marxe do fundido
+    // pídese só cando fai falta. Preciso: 11,5 ms detrás, dentro de ciclos xa medidos (sen
+    // extrapolar), coa marxe sempre
+    void configure (bool isPrecise) { precise = isPrecise; dLead = precise ? dMin + xfGuard + (int) std::lround (0.0115 * sr) : dMin; }
     int latency() const { return dLead; }
 
     void reset() { restart (0); }
@@ -111,16 +118,24 @@ public:
             if (voiced) an.outputMidi = mNow + dirCorr;
         }
 
-        // saída: un punteiro (ou dous durante un fundido), o mesmo para cada canle
+        // saída: un punteiro (ou dous durante un fundido), o mesmo para cada canle. Se o ton
+        // sobe de golpe a media fundido, a lectura vella podería pasar a escritura: acábase xa
+        if (xfPos >= 0 && (double) an.n - rp < (double) Sinc::half) { rp = rp2; xfPos = -1; }
         for (int c = 0; c < nch; ++c) y[c] = an.read (src (c), rp);
         if (xfPos >= 0)
         {
             const double w = 0.5 - 0.5 * std::cos (kPi * (xfPos + 0.5) / xfLen);
             for (int c = 0; c < nch; ++c) y[c] = (float) (y[c] * (1.0 - w) + an.read (src (c), rp2) * w);
-            rp2 += rho;
-            if (++xfPos >= xfLen) { rp = rp2; xfPos = -1; }
         }
         rp += rho;
+        if (xfPos >= 0)
+        {
+            rp2 += rho;
+            // ao acabar o fundido, a lectura segue onde vai a nova. Antes adiantábase outra
+            // vez despois e cada salto perdía unha mostra: a voz quedaba fóra de fase e os
+            // harmónicos altos rascaban (ruído entre harmónicos de −32 dB con só 4 saltos)
+            if (++xfPos >= xfLen) { rp = rp2; xfPos = -1; }
+        }
 
         // formantes: ao transpor (ou co mando de formantes) devolve o timbre da voz orixinal.
         // Sen ton (consoantes, respiracións) lese a velocidade 1 e non hai nada que corrixir:
@@ -170,31 +185,37 @@ public:
             // o salto escóllese comparando medio ciclo (o fundido é curto: así non mestura dous ciclos distintos)
             const int cmp = (int) clampd (P * 0.5, (double) xfade, 2048.0);
             xfLen = xfade;
-            if (rho > 1.0 && D < (double) dLead)
+            const double guard = precise ? 0.0 : (rho - 1.0) * xfGuard + 1.0;
+            if (rho > 1.0 && D < (double) dLead + guard)
             {
                 // a lectura alcanza a escritura (ton para arriba): volve atrás un ciclo
-                const double j = voiced ? bestJump (rp, P, P * 0.12, -1.0, (double) (an.ringSize / 2), std::min (cmp, (int) D - 2)) : P;
+                const int fwd = std::max (1, std::min (cmp, (int) D - 2));
+                const double j = voiced ? bestJump (rp, P, P * 0.12, -1.0, (double) (an.ringSize / 2), fwd, cmp - fwd) : P;
                 rp2 = rp - j; xfPos = 0;
             }
             else if (rho <= 1.0 && D >= (double) dLead + 1.25 * P)
             {
                 // a lectura quedou atrás (ton para abaixo): salta un ciclo adiante, así o atraso nunca medra
                 const double maxJ = D - (double) dLead - 2.0;
-                const double j = voiced ? bestJump (rp, P, P * 0.12, +1.0, maxJ, std::min (cmp, (int) (D - maxJ) - 2)) : std::min (P, maxJ);
+                const int fwd = std::max (1, std::min (cmp, (int) (D - maxJ) - 2));
+                const double j = voiced ? bestJump (rp, P, P * 0.12, +1.0, maxJ, fwd, cmp - fwd) : std::min (P, maxJ);
                 rp2 = rp + j; xfPos = 0;
             }
         }
     }
 
 private:
-    // Mellor salto (arredor de nominal, en ±range) para que o tramo que empeza en p+sign·j
-    // se pareza ao que empeza en p: correlación normalizada sobre o fundido + parábola.
-    double bestJump (double p, double nominal, double spread, double sign, double maxJump, int len)
+    // Mellor salto (arredor de nominal, en ±range) para que o tramo arredor de p+sign·j se
+    // pareza ao de arredor de p: correlación normalizada + parábola. O tramo vai de «back»
+    // mostras antes de p ata «fwd» despois: preto da escritura non hai futuro abondo e
+    // mírase tamén o pasado (a voz é case periódica: o que encaixa antes, encaixa despois)
+    double bestJump (double p, double nominal, double spread, double sign, double maxJump, int fwd, int back)
     {
+        const int len = fwd + back;
         const int lo = std::max (1, (int) std::floor (nominal - spread));
         const int hi = std::min ({ (int) std::floor (maxJump), (int) std::ceil (nominal + spread), lo + maxSearch - 1 });
         if (hi < lo) return std::max (1.0, std::min (nominal, maxJump));
-        const int64_t base = (int64_t) std::floor (p);
+        const int64_t base = (int64_t) std::floor (p) - back;
         auto X = [this] (int64_t i) { return (double) an.in[(size_t) (i & (an.ringSize - 1))]; };
         double aa = 1e-12;
         for (int k = 0; k < len; ++k) aa += X (base + k) * X (base + k);
@@ -231,7 +252,7 @@ private:
     double sr = 48000;
     double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, dirAlphaUnvoiced = 0.01, lookAhead = 0, ffixAlpha = 0.001, ffixAlphaFast = 0.004, envAlpha = 0.007;
     double envIn[2] {}, envOut[2] {};
-    int xfade = 36, dMin = 44, dLead = 44;
+    int xfade = 36, xfGuard = 32, dMin = 12, dLead = 12;
     int xfPos = -1, xfLen = 36;
     double score[maxSearch] {};
 };

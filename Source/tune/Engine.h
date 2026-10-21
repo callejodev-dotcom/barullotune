@@ -54,7 +54,12 @@ public:
     // volva entrar a voz (antes, en Estudio, o son volvía de golpe aos 36 ms)
     void switchTo (int q, int r) { setMode (q, r, false); }
 
+    // o atraso real da saída (para aliñar a orixinal na mestura e no bypass)
     int latency() const { return latencySamples; }
+    // o que se lle declara ao DAW. En Directo, 0: o que queda (12 mostras, 0,25 ms) é o
+    // mínimo do interpolador e, corrixindo, a lectura vai ademais ata un ciclo por detrás,
+    // así que non é un atraso fixo que o DAW poida compensar
+    int reportedLatency() const { return quality == Direct ? 0 : latencySamples; }
     int currentQuality() const { return quality; }
     int currentRange() const { return range; }
 

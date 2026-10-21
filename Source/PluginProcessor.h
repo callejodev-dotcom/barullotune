@@ -105,6 +105,10 @@ public:
 
     juce::AudioProcessorValueTreeState params;
 
+    // armonías
+    static constexpr int numHarmonies = tune::Settings::maxHarmonies;
+    static const juce::StringArray& intervalNames();   // 8ª abaixo … unísono … 8ª arriba (graos −7..+7)
+
     // máscara de notas permitidas (bit = clase de altura absoluta, 0 = Do)
     uint16_t effectiveMask() const;
     // a interface pulsa unha tecla da escala: pasa a «Personalizada» se fai falta
@@ -143,6 +147,8 @@ private:
     void applyEngineSettings();
     bool engineSettingsPending() const;
     void process (juce::AudioBuffer<float>&, juce::MidiBuffer&, bool hostBypass);
+    float leadGainTarget() const;
+    void harmGains (int h, float& gl, float& gr) const;
 
     tune::Engine engine;
     std::array<std::vector<float>, 2> dry;
@@ -164,7 +170,12 @@ private:
     std::array<std::atomic<float>, 12> keyHist {};
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
-    std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman;
+    std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman, *pPrincipal, *pHarmMode;
+    struct HarmParams { std::atomic<float>* on, *interval, *level, *pan, *detune, *delay, *formant; };
+    std::array<HarmParams, numHarmonies> harmP {};
+    struct HarmState { std::vector<float> line; int pos = 0; juce::SmoothedValue<float> gL, gR, del; };
+    std::array<HarmState, numHarmonies> harmS;
+    juce::SmoothedValue<float> leadSm, harmSm;
     juce::AudioProcessorParameter* bypassParam = nullptr;
     std::array<std::atomic<float>*, 12> pNota {}, pLibre {};
 

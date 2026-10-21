@@ -25,6 +25,27 @@ struct Settings
     double formant = 0.0;      // semitonos (en Directo e Preciso, coa corrección de formantes)
     double flex = 0.0;         // 0..1: canto máis lonxe da nota, menos se corrixe (blue notes, arrastres)
     double humanize = 0.0;     // 0..1: nas notas longas a corrección vaise relaxando
+
+    // armonías: voces novas a partir da voz cantada
+    static constexpr int maxHarmonies = 4;
+    enum HarmonyMode { HarmonyScale = 0, HarmonyMidiChord = 1 };
+    struct Harmony
+    {
+        bool on = false;
+        int degrees = 2;        // intervalo en graos da escala: +2 = terceira arriba, −7 = oitava abaixo
+        double detune = 0.0;    // cents (para que non soe pegada á principal)
+        double formant = 0.0;   // semitonos (outra voz: máis grande ou máis pequena)
+    };
+    Harmony harm[maxHarmonies];
+    int harmonyMode = HarmonyScale;
+};
+
+// o que fai unha voz de saída: a principal (todas as canles; o que se amosa) ou unha
+// armonía (o centro mono, cun intervalo sobre a nota da principal)
+struct VoiceRole
+{
+    bool harmony = false;
+    int index = 0;
 };
 
 // ---- o modelo de corrección (o mesmo para todos os xeitos) ----

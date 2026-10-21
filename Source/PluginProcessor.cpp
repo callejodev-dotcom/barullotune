@@ -57,6 +57,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
         AudioParameterChoiceAttributes().withAutomatable (false)));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "comparar", 1 }, U ("Comparar (voz orixinal)"), false));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, U ("Bypass"), false));
+
+    // armonías
+    auto dbFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v <= -47.9f ? String ("non") : String (v, 1) + " dB"; });
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "principal", 1 }, U ("Voz principal"), NormalisableRange<float> (-48.0f, 6.0f, 0.1f), 0.0f, dbFmt));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "armonia_modo", 1 }, U ("Armonías"), StringArray { U ("Escala"), U ("Acorde MIDI") }, 0));
+    for (int h = 0; h < TuneProcessor::numHarmonies; ++h)
+    {
+        const String id ("harm" + String (h + 1)), nm (U ("Armonía ") + String (h + 1));
+        static const int defInt[4] = { 9, 11, 5, 0 };
+        static const float defPan[4] = { -35, 35, -65, 65 }, defDet[4] = { 5, -6, 8, -4 }, defDel[4] = { 10, 18, 25, 32 };
+        l.add (std::make_unique<AudioParameterBool> (ParameterID { id, 1 }, nm, false));
+        l.add (std::make_unique<AudioParameterChoice> (ParameterID { id + "_intervalo", 1 }, nm + U (": intervalo"), TuneProcessor::intervalNames(), defInt[h]));
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_nivel", 1 }, nm + U (": nivel"), NormalisableRange<float> (-48.0f, 6.0f, 0.1f), -4.0f, dbFmt));
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_pan", 1 }, nm + U (": panorama"), NormalisableRange<float> (-100.0f, 100.0f, 1.0f), defPan[h],
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { const int i = roundToInt (v); return i == 0 ? String ("C") : (i < 0 ? "I" + String (-i) : "D" + String (i)); })));
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_desafinar", 1 }, nm + U (": desafinar"), NormalisableRange<float> (-25.0f, 25.0f, 0.1f), defDet[h],
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " c"; })));
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_atraso", 1 }, nm + U (": atraso"), NormalisableRange<float> (0.0f, 60.0f, 0.1f), defDel[h],
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " ms"; })));
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_formantes", 1 }, nm + U (": formantes"), NormalisableRange<float> (-4.0f, 4.0f, 0.1f), 0.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.05f ? String ("0") : (v > 0 ? "+" : "") + String (v, 1); })));
+    }
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "formantes", 1 }, U ("Formantes"), NormalisableRange<float> (-7.0f, 7.0f, 0.1f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.05f ? String ("0") : (v > 0 ? "+" : "") + String (v, 1); })));
     return l;
@@ -88,6 +110,20 @@ TuneProcessor::TuneProcessor()
     pForm = params.getRawParameterValue ("formantes");
     pComp = params.getRawParameterValue ("comparar");
     pBypass = params.getRawParameterValue ("bypass");
+    pPrincipal = params.getRawParameterValue ("principal");
+    pHarmMode = params.getRawParameterValue ("armonia_modo");
+    for (int h = 0; h < numHarmonies; ++h)
+    {
+        const juce::String id ("harm" + juce::String (h + 1));
+        auto& hp = harmP[(size_t) h];
+        hp.on = params.getRawParameterValue (id);
+        hp.interval = params.getRawParameterValue (id + "_intervalo");
+        hp.level = params.getRawParameterValue (id + "_nivel");
+        hp.pan = params.getRawParameterValue (id + "_pan");
+        hp.detune = params.getRawParameterValue (id + "_desafinar");
+        hp.delay = params.getRawParameterValue (id + "_atraso");
+        hp.formant = params.getRawParameterValue (id + "_formantes");
+    }
     bypassParam = params.getParameter ("bypass");
     for (int i = 0; i < 12; ++i) pNota[(size_t) i] = params.getRawParameterValue ("nota" + juce::String (i));
     for (int i = 0; i < 12; ++i) pLibre[(size_t) i] = params.getRawParameterValue ("libre" + juce::String (i));
@@ -161,8 +197,44 @@ void TuneProcessor::prepareToPlay (double sr, int)
     gainSm.reset (sr, 0.03); gainSm.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVol->load()));
     bypassSm.reset (sr, 0.02); bypassSm.setCurrentAndTargetValue (pBypass->load() > 0.5f ? 1.0f : 0.0f);
     switchGain = 1.0f; switchState = 0; switchStep = (float) (1.0 / (0.005 * sr));
+    leadSm.reset (sr, 0.03); leadSm.setCurrentAndTargetValue (leadGainTarget());
+    harmSm.reset (sr, 0.03); harmSm.setCurrentAndTargetValue (pComp->load() > 0.5f ? 0.0f : 1.0f);
+    for (int h = 0; h < numHarmonies; ++h)
+    {
+        auto& hs = harmS[(size_t) h];
+        hs.line.assign ((size_t) (0.07 * sr) + 4, 0.0f);
+        hs.pos = 0;
+        hs.gL.reset (sr, 0.03); hs.gR.reset (sr, 0.03); hs.del.reset (sr, 0.05);
+        float gl, gr; harmGains (h, gl, gr);
+        hs.gL.setCurrentAndTargetValue (gl); hs.gR.setCurrentAndTargetValue (gr);
+        hs.del.setCurrentAndTargetValue ((float) (harmP[(size_t) h].delay->load() * 0.001 * sr));
+    }
     frameCount = 0; levelAcc = 0;
     fifo.reset();
+}
+
+const juce::StringArray& TuneProcessor::intervalNames()
+{
+    static const juce::StringArray n { U ("8ª abaixo"), U ("7ª abaixo"), U ("6ª abaixo"), U ("5ª abaixo"), U ("4ª abaixo"), U ("3ª abaixo"), U ("2ª abaixo"),
+                                       U ("Unísono"), U ("2ª arriba"), U ("3ª arriba"), U ("4ª arriba"), U ("5ª arriba"), U ("6ª arriba"), U ("7ª arriba"), U ("8ª arriba") };
+    return n;
+}
+
+float TuneProcessor::leadGainTarget() const
+{
+    const float db = pPrincipal->load();
+    return db <= -47.9f ? 0.0f : juce::Decibels::decibelsToGain (db);
+}
+
+// nivel e panorama (potencia constante) dunha armonía
+void TuneProcessor::harmGains (int h, float& gl, float& gr) const
+{
+    const auto& hp = harmP[(size_t) h];
+    const float db = hp.level->load();
+    const float g = db <= -47.9f ? 0.0f : juce::Decibels::decibelsToGain (db);
+    const float a = (juce::jlimit (-100.0f, 100.0f, hp.pan->load()) + 100.0f) / 200.0f * juce::MathConstants<float>::halfPi;
+    gl = g * std::cos (a) * juce::MathConstants<float>::sqrt2;   // no centro, cada lado a 0 dB
+    gr = g * std::sin (a) * juce::MathConstants<float>::sqrt2;
 }
 
 uint16_t TuneProcessor::effectiveMask() const
@@ -299,6 +371,23 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     engine.vibrato = pVib->load() * 0.01;
     engine.flex = pFlex->load() * 0.01;
     engine.humanize = pHuman->load() * 0.01;
+    engine.harmonyMode = juce::jlimit (0, 1, (int) pHarmMode->load());
+    bool anyHarm = false;
+    for (int h = 0; h < numHarmonies; ++h)
+    {
+        const auto& hp = harmP[(size_t) h];
+        auto& eh = engine.harm[h];
+        eh.on = hp.on->load() > 0.5f;
+        eh.degrees = juce::jlimit (0, 14, (int) hp.interval->load()) - 7;
+        eh.detune = hp.detune->load();
+        eh.formant = hp.formant->load();
+        anyHarm |= eh.on;
+        float gl, gr; harmGains (h, gl, gr);
+        harmS[(size_t) h].gL.setTargetValue (gl); harmS[(size_t) h].gR.setTargetValue (gr);
+        harmS[(size_t) h].del.setTargetValue ((float) (hp.delay->load() * 0.001 * getSampleRate()));
+    }
+    leadSm.setTargetValue (leadGainTarget());
+    harmSm.setTargetValue (pComp->load() > 0.5f ? 0.0f : 1.0f);   // comparar: só a voz orixinal
     engine.freeMask = freeMask();
     engine.transpose = std::round (pTrans->load());
     engine.refA = pLa->load();
@@ -328,15 +417,34 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         else if (numIn > 0) x[0] = buffer.getReadPointer (0)[i];
         for (auto& v : x) if (! std::isfinite (v)) v = 0;
 
-        engine.processFrame (x, wet, ech);
+        float hv[numHarmonies] = {};
+        engine.processFrame (x, wet, ech, anyHarm ? hv : nullptr);
+        // armonías: atraso, nivel e panorama de cada unha
+        float harmC[2] = { 0, 0 };
+        const float hm = harmSm.getNextValue();
+        for (int h = 0; h < numHarmonies; ++h)
+        {
+            auto& hs = harmS[(size_t) h];
+            const float gl = hs.gL.getNextValue(), gr = hs.gR.getNextValue(), dl = hs.del.getNextValue();
+            if (! anyHarm || ! engine.harm[h].on) continue;
+            const int L = (int) hs.line.size();
+            hs.line[(size_t) hs.pos] = hv[h];
+            double rpos = hs.pos - (double) dl; while (rpos < 0) rpos += L;
+            const int i0 = (int) rpos, i1 = (i0 + 1) % L;
+            const float fr = (float) (rpos - i0);
+            const float v = (hs.line[(size_t) i0] + (hs.line[(size_t) i1] - hs.line[(size_t) i0]) * fr) * hm;
+            if (++hs.pos >= L) hs.pos = 0;
+            if (ech == 2) { harmC[0] += v * gl; harmC[1] += v * gr; }
+            else harmC[0] += v * std::sqrt (gl * gl + gr * gr);   // mono: sen panorama
+        }
         int rd = dryPos - lat; if (rd < 0) rd += dsz;
-        const float mix = mixSm.getNextValue(), g = gainSm.getNextValue(), byp = bypassSm.getNextValue();
+        const float mix = mixSm.getNextValue(), g = gainSm.getNextValue(), byp = bypassSm.getNextValue(), lead = leadSm.getNextValue();
         float peakIn = 0, peakOut = 0;
         for (int c = 0; c < ech; ++c)
         {
             dry[(size_t) c][(size_t) dryPos] = x[c];
             const float dx = dry[(size_t) c][(size_t) rd];
-            float y = (dx + (wet[c] - dx) * mix) * g;
+            float y = ((dx + (wet[c] - dx) * mix) * lead + harmC[c]) * g;
             if (byp > 0.0f) y = byp >= 1.0f ? dx : y + (dx - y) * byp;
             y *= switchGain;
             buffer.getWritePointer (c)[i] = y;

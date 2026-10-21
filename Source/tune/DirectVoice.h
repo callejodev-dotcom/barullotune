@@ -13,7 +13,7 @@ namespace tune {
 class DirectVoice
 {
 public:
-    DirectVoice (const Settings& s, Analysis& a) : set (s), an (a), corr (s), decider (s, a.midi) {}
+    DirectVoice (const Settings& s, Analysis& a, VoiceRole r = {}) : set (s), an (a), role (r), corr (s), decider (s, a.midi) {}
 
     void prepare (double sampleRate)
     {
@@ -27,6 +27,7 @@ public:
         ffixAlpha = 1.0 - std::exp (-1.0 / (0.02 * sr));
         ffixAlphaFast = 1.0 - std::exp (-1.0 / (0.005 * sr));
         envAlpha = 1.0 - std::exp (-1.0 / (0.003 * sr));
+        gateAlpha = 1.0 - std::exp (-1.0 / (0.01 * sr));
         dirAlpha = 1.0 - std::exp (-1.0 / (0.0015 * sr));
         lookAhead = 0.0015 * sr;   // o atraso dese suavizado
     }
@@ -44,11 +45,14 @@ public:
         envIn[0] = envIn[1] = envOut[0] = envOut[1] = 0;
         decider.reset(); decCount = 0;
         rp = (double) n - (double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; state = {};
+        gate = 0;
     }
 
     void process (float* y)
     {
-        const int nch = an.nch;
+        // a principal le todas as canles; unha armonía, o centro (mono)
+        const int nch = role.harmony ? 1 : an.nch;
+        auto src = [this] (int c) -> const std::vector<float>& { return role.harmony ? an.in : an.inCh[c]; };
         const bool voiced = an.voiced;
         const double transpose = set.transpose;
         // corrección mostra a mostra (co ton detectado agora mesmo). Sen ton (consoantes
@@ -78,21 +82,34 @@ public:
             target = decider.target;
         }
         else if (decider.active) decider.reset();
-        const bool starting = voiced && target >= 0 && ! state.active;
-        if (voiced && target >= 0) { double om; raw = corr.step (state, mNow, target, 1.0, an.isFree (target), an.bendNow(), om); }
+        // armonía: a mesma corrección cá principal e, enriba, o intervalo ata a súa nota
+        double offset = 0.0, formant = set.formant;
+        bool sounding = voiced && target >= 0;
+        if (role.harmony)
+        {
+            const int ht = sounding ? harmonyNote (set, an.midi, target, role.index) : -1;
+            sounding = ht >= 0;
+            if (sounding) offset = (ht - target) + set.harm[role.index].detune * 0.01;
+            formant += set.harm[role.index].formant;
+        }
+        const bool starting = sounding && ! state.active;
+        if (voiced && target >= 0) { double om; raw = corr.step (state, mNow, target, 1.0, an.isFree (target), an.bendNow(), om) + offset; }
         else state.active = false;
         if (starting) dirCorr = raw;
         else dirCorr += (raw - dirCorr) * dirAlpha;   // 1,5 ms de suavizado, para que non rasque
         rho = std::pow (2.0, dirCorr / 12.0);
-        an.correctionCents = voiced ? (dirCorr - transpose) * 100.0 : 0.0;
-        if (voiced) an.outputMidi = mNow + dirCorr;
+        if (! role.harmony)
+        {
+            an.correctionCents = voiced ? (dirCorr - transpose) * 100.0 : 0.0;
+            if (voiced) an.outputMidi = mNow + dirCorr;
+        }
 
         // saída: un punteiro (ou dous durante un fundido), o mesmo para cada canle
-        for (int c = 0; c < nch; ++c) y[c] = an.read (an.inCh[c], rp);
+        for (int c = 0; c < nch; ++c) y[c] = an.read (src (c), rp);
         if (xfPos >= 0)
         {
             const double w = 0.5 - 0.5 * std::cos (kPi * (xfPos + 0.5) / xfLen);
-            for (int c = 0; c < nch; ++c) y[c] = (float) (y[c] * (1.0 - w) + an.read (an.inCh[c], rp2) * w);
+            for (int c = 0; c < nch; ++c) y[c] = (float) (y[c] * (1.0 - w) + an.read (src (c), rp2) * w);
             rp2 += rho;
             if (++xfPos >= xfLen) { rp = rp2; xfPos = -1; }
         }
@@ -102,8 +119,7 @@ public:
         // Sen ton (consoantes, respiracións) lese a velocidade 1 e non hai nada que corrixir:
         // apágase en 5 ms (na fronteira entre unha vogal e unha «s», as dúas envolventes son
         // de sons distintos e unha resonancia aguda disparábase uns 10 ms)
-        const double formant = set.formant;
-        const bool want = voiced && (std::abs (transpose) >= 0.99 || std::abs (formant) >= 0.05);
+        const bool want = voiced && (std::abs (transpose + offset) >= 0.99 || std::abs (formant) >= 0.05);
         ffix.amount += ((want ? 1.0 : 0.0) - ffix.amount) * (want ? ffixAlpha : ffixAlphaFast);
         if (ffix.amount < 1e-4 && ! want) { if (ffix.ready) ffix.reset(); }
         else
@@ -129,6 +145,12 @@ public:
                 if (envOut[c] > 4.0 * envIn[c] + 1e-12) fixed *= std::sqrt ((4.0 * envIn[c] + 1e-12) / envOut[c]);
                 y[c] = (float) (y[c] + (fixed - y[c]) * ffix.amount);
             }
+        }
+        // unha armonía só soa cando hai voz e nota (sen ton, as consoantes dobradas emborranan)
+        if (role.harmony)
+        {
+            gate += ((sounding ? 1.0 : 0.0) - gate) * gateAlpha;
+            y[0] = (float) (y[0] * gate);
         }
 
         // ¿fai falta saltar un ciclo?
@@ -189,9 +211,11 @@ private:
     static constexpr int maxSearch = Analysis::maxSearch;
     const Settings& set;
     Analysis& an;
+    VoiceRole role;
     Corrector corr;
     CorrState state;
     NoteDecider decider;
+    double gate = 0, gateAlpha = 0.002;
     int decHop = 192, decCount = 0;
     bool precise = false;
     FormantFix ffix;

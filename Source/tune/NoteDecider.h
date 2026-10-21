@@ -53,6 +53,40 @@ inline bool noteFree (const Settings& set, const MidiState& midi, int note)
     return (set.freeMask >> deg) & 1;
 }
 
+// A nota dunha armonía para a nota principal «lead». En escala: o intervalo en graos da
+// escala (a terceira dunha nota da escala é a nota da escala dous pasos arriba, maior ou
+// menor segundo onde caia). Se a escala é cromática (ou ten moi poucas notas), os
+// intervalos son os da escala maior: terceira = 4 semitonos, quinta = 7... En acorde MIDI:
+// a voz i vai á i-ésima tecla tocada (de grave a aguda). Devolve −1 se non hai nota.
+inline int harmonyNote (const Settings& set, const MidiState& midi, int lead, int index)
+{
+    if (lead < 0 || index < 0 || index >= Settings::maxHarmonies) return -1;
+    if (set.harmonyMode == Settings::HarmonyMidiChord)
+    {
+        int k = 0;
+        for (int nt = 0; nt < 128; ++nt)
+            if (midi.held[nt] && k++ == index) return nt;
+        return -1;
+    }
+    const int deg = std::max (-14, std::min (14, set.harm[index].degrees));
+    uint16_t mask = 0;
+    if ((set.mode == Settings::MidiScale || set.mode == Settings::MidiNote) && midi.heldMask != 0) mask = midi.heldMask;
+    else for (int pc = 0; pc < 12; ++pc) if ((set.scale >> (((pc - set.key) % 12 + 12) % 12)) & 1) mask |= (uint16_t) (1u << pc);
+    int count = 0; for (int pc = 0; pc < 12; ++pc) count += (mask >> pc) & 1;
+    if (count >= 12 || count < 3)
+    {
+        static const int major[8] = { 0, 2, 4, 5, 7, 9, 11, 12 };
+        const int a = std::abs (deg), semis = (a / 7) * 12 + major[a % 7];
+        return lead + (deg < 0 ? -semis : semis);
+    }
+    auto in = [mask] (int nt) { return (mask >> (((nt % 12) + 12) % 12)) & 1; };
+    int nt = lead;
+    while (! in (nt)) --nt;   // unha nota libre ou fóra: cóntase desde a da escala de debaixo
+    const int dir = deg < 0 ? -1 : 1;
+    for (int k = 0; k < std::abs (deg); ++k) { nt += dir; while (! in (nt)) nt += dir; }
+    return nt;
+}
+
 class NoteDecider
 {
 public:

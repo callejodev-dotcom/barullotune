@@ -25,7 +25,11 @@ public:
     static constexpr int numRanges = Analysis::numRanges;
     static void rangeHz (int r, double& lo, double& hi) { Analysis::rangeHz (r, lo, hi); }
 
-    Engine() : an (*this), direct (*this, an), studio (*this, an) {}
+    Engine()
+        : an (*this), direct (*this, an), studio (*this, an),
+          harmDirect { DirectVoice (*this, an, { true, 0 }), DirectVoice (*this, an, { true, 1 }), DirectVoice (*this, an, { true, 2 }), DirectVoice (*this, an, { true, 3 }) },
+          harmStudio { StudioVoice (*this, an, { true, 0 }), StudioVoice (*this, an, { true, 1 }), StudioVoice (*this, an, { true, 2 }), StudioVoice (*this, an, { true, 3 }) }
+    {}
     Engine (const Engine&) = delete;
     Engine& operator= (const Engine&) = delete;
 
@@ -36,6 +40,9 @@ public:
         an.prepare (sampleRate);
         direct.prepare (sampleRate);
         studio.prepare (sampleRate);
+        for (auto& h : harmDirect) h.prepare (sampleRate);
+        for (auto& h : harmStudio) h.prepare (sampleRate);
+        for (auto& h : harmDirect) h.configure (false);
         configure (quality, range);
     }
 
@@ -56,6 +63,9 @@ public:
         an.reset();
         studio.reset (latencySamples);
         direct.reset();
+        for (auto& h : harmDirect) h.reset();
+        for (auto& h : harmStudio) h.reset (latencySamples);
+        for (auto& w : harmWasOn) w = false;
     }
 
     void noteOn (int note) { an.midi.noteOn (note); }
@@ -65,12 +75,21 @@ public:
     float process (float x) { float y = 0; processFrame (&x, &y, 1); return y; }
 
     // unha mostra de 1 ou 2 canles: o ton detéctase no centro (L+R)/2 e as dúas canles
-    // corríxense exactamente igual, así a imaxe estéreo non se move
-    void processFrame (const float* x, float* y, int numChannels)
+    // corríxense exactamente igual, así a imaxe estéreo non se move. harmOut (se non é
+    // nulo): a saída mono de cada armonía (maxHarmonies), sen nivel nin panorama
+    void processFrame (const float* x, float* y, int numChannels, float* harmOut = nullptr)
     {
         an.push (x, numChannels);
         if (quality != Studio) an.slideUpdate();
         if (quality == Studio) studio.process (y); else direct.process (y);
+        if (harmOut != nullptr)
+            for (int h = 0; h < maxHarmonies; ++h)
+            {
+                harmOut[h] = 0.0f;
+                if (! harm[h].on) { harmWasOn[h] = false; continue; }
+                if (! harmWasOn[h]) { harmDirect[h].restart (an.n); harmStudio[h].restart (an.n, latencySamples); harmWasOn[h] = true; }
+                if (quality == Studio) harmStudio[h].process (&harmOut[h]); else harmDirect[h].process (&harmOut[h]);
+            }
         an.advance();
     }
 
@@ -92,15 +111,24 @@ private:
         range = std::max (0, std::min ((int) numRanges - 1, r));
         if (full || range != oldRange) an.setRange (range);
         direct.configure (quality == Precise);
+        for (auto& h : harmDirect) h.configure (quality == Precise);
         latencySamples = quality == Studio ? StudioVoice::latencyFor (an.pMax) : direct.latency();
         an.latencySamples = latencySamples;
         if (full) reset();
-        else { direct.restart (an.n); studio.restart (an.n, latencySamples); }
+        else
+        {
+            direct.restart (an.n); studio.restart (an.n, latencySamples);
+            for (auto& h : harmDirect) h.restart (an.n);
+            for (auto& h : harmStudio) h.restart (an.n, latencySamples);
+        }
     }
 
     Analysis an;
     DirectVoice direct;
     StudioVoice studio;
+    DirectVoice harmDirect[maxHarmonies];
+    StudioVoice harmStudio[maxHarmonies];
+    bool harmWasOn[maxHarmonies] {};
     int quality = Direct, range = Analysis::General;
     int latencySamples = 64;
 };

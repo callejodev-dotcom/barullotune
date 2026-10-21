@@ -11,14 +11,14 @@ namespace tune {
 class StudioVoice
 {
 public:
-    StudioVoice (const Settings& s, Analysis& a) : set (s), an (a), corr (s), decider (s, a.midi) {}
+    StudioVoice (const Settings& s, Analysis& a, VoiceRole r = {}) : set (s), an (a), role (r), corr (s), decider (s, a.midi) {}
 
     void prepare (double sampleRate)
     {
         sr = sampleRate;
         corr.prepare (sr);
         decider.prepare (sr);
-        for (int c = 0; c < 2; ++c) outCh[c].assign ((size_t) an.ringSize, 0.0);
+        for (int c = 0; c < (role.harmony ? 1 : 2); ++c) outCh[c].assign ((size_t) an.ringSize, 0.0);   // unha armonía é mono
     }
 
     static int latencyFor (int pMax) { return (int) std::ceil (2.5 * pMax) + 32; }
@@ -32,6 +32,7 @@ public:
         latency = latencySamples;
         nextSyn = (double) (n + an.pMax); srcOff = -(double) latency; synVoiced = false; state = {};
         decider.reset(); lastDecPos = -1e18;
+        gate = 0;
     }
 
     void process (float* y)
@@ -39,7 +40,7 @@ public:
         const int64_t n = an.n;
         while (nextSyn <= (double) (n + an.pMax)) synthesize();
         const size_t o = (size_t) (n & (an.ringSize - 1));
-        for (int c = 0; c < an.nch; ++c)
+        for (int c = 0; c < (role.harmony ? 1 : an.nch); ++c)
         {
             y[c] = (float) outCh[c][o];   // PSOLA clásico: sen normalizar (cada pulso conserva o seu nivel)
             outCh[c][o] = 0;
@@ -71,7 +72,8 @@ private:
     {
         const int64_t n = an.n;
         const double ti = nextSyn - latency;
-        const double fr = std::pow (2.0, clampd (set.formant, -7.0, 7.0) / 12.0);   // lectura máis rápida = formantes máis altos
+        const double formant = set.formant + (role.harmony ? set.harm[role.index].formant : 0.0);
+        const double fr = std::pow (2.0, clampd (formant, -7.0, 7.0) / 12.0);   // lectura máis rápida = formantes máis altos
         const double reach = std::max (1.0, fr);
         auto ready = [&] (const Analysis::Mark& m2) { return m2.pos + std::ceil (m2.period * (m2.voiced ? reach : 1.0)) + 2 + Sinc::half <= (double) n; };
         // marca máis próxima a ti que xa teña todo o grano dispoñible
@@ -104,6 +106,15 @@ private:
         const int target = decideTarget (bestK, mk);
 
         double P = mk.period, spacing = P, rf = 1.0;
+        // armonía: a mesma corrección cá principal e, enriba, o intervalo ata a súa nota
+        double offset = 0.0;
+        bool sounding = mk.voiced && target >= 0;
+        if (role.harmony && sounding)
+        {
+            const int ht = harmonyNote (set, an.midi, target, role.index);
+            sounding = ht >= 0;
+            if (sounding) offset = (ht - target) + set.harm[role.index].detune * 0.01;
+        }
         if (mk.voiced && target >= 0)
         {
             // cada grano co seu propio ton: a corrección calcúlase co período deste grano,
@@ -111,18 +122,29 @@ private:
             P = an.localPeriod (bestK);
             const double m = 69.0 + 12.0 * std::log2 (sr / P / set.refA);
             double om = m;
-            const double cc = corr.step (state, m, target, P, an.isFree (target), an.bendNow(), om);
+            const double cc = corr.step (state, m, target, P, an.isFree (target), an.bendNow(), om) + offset;
             synVoiced = true;
             spacing = P / std::pow (2.0, cc / 12.0);
-            an.correctionCents = (cc - set.transpose) * 100.0;
-            an.outputMidi = om;
+            if (! role.harmony)
+            {
+                an.correctionCents = (cc - set.transpose) * 100.0;
+                an.outputMidi = om;
+            }
             rf = fr;
         }
         else
         {
             // xordo: OLA sen cambio de tempo
             P = an.unvoicedP; spacing = P;
-            synVoiced = false; state.active = false; an.correctionCents = 0;
+            synVoiced = false; state.active = false;
+            if (! role.harmony) an.correctionCents = 0;
+        }
+        // unha armonía só soa cando hai voz e nota (sen ton, as consoantes dobradas emborranan)
+        double g = 1.0;
+        if (role.harmony)
+        {
+            gate += ((sounding ? 1.0 : 0.0) - gate) * (1.0 - std::exp (-spacing / (0.01 * sr)));
+            g = gate;
         }
         const int half = (int) std::ceil (P);
         const int64_t c = (int64_t) std::floor (nextSyn);
@@ -138,23 +160,26 @@ private:
             src = nextSyn + srcOff;
         }
         if (mk.voiced && synVoiced) srcOff = mk.pos - nextSyn;
-        const int nch = an.nch, ringSize = an.ringSize;
-        for (int k = -half; k <= half; ++k)
+        const int nch = role.harmony ? 1 : an.nch, ringSize = an.ringSize;
+        auto srcBuf = [this] (int ch) -> const std::vector<float>& { return role.harmony ? an.in : an.inCh[ch]; };
+        for (int k = -half; k <= half && g >= 1e-4; ++k)
         {
             const double off = k - frac;          // distancia ao centro do grano (na saída)
             if (std::abs (off) >= P) continue;
             if (c + k < n) continue;
-            const double w = 0.5 * (1.0 + std::cos (kPi * off / P));
+            const double w = 0.5 * (1.0 + std::cos (kPi * off / P)) * g;
             const double sp = src + off * rf;
             const int64_t i0 = (int64_t) std::floor (sp);
             if (i0 + Sinc::half > n || i0 < n - ringSize + 2 * Sinc::half) continue;
-            for (int ch = 0; ch < nch; ++ch) outCh[ch][(size_t) ((c + k) & (ringSize - 1))] += an.read (an.inCh[ch], sp) * w;
+            for (int ch = 0; ch < nch; ++ch) outCh[ch][(size_t) ((c + k) & (ringSize - 1))] += an.read (srcBuf (ch), sp) * w;
         }
         nextSyn += spacing;
     }
 
     const Settings& set;
     Analysis& an;
+    VoiceRole role;
+    double gate = 0;
     Corrector corr;
     CorrState state;
     NoteDecider decider;

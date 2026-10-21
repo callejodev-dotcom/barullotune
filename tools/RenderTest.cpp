@@ -266,12 +266,13 @@ static void cpuBench (double seconds)
 {
     std::vector<double> tr;
     const auto v = makeVoice (tr);
-    for (int q = 0; q < 4; ++q)
+    for (int q = 0; q < 6; ++q)
     {
         TuneProcessor p;
         p.setPlayConfigDetails (2, 2, SR, 128);
-        setP (p, "calidade", (float) (q == 3 ? 0 : q));
+        setP (p, "calidade", (float) (q == 3 || q == 4 ? 0 : q == 5 ? 2 : q));
         if (q == 3) setP (p, "transpor", 5);   // directo transpondo: coa corrección de formantes
+        if (q >= 4) for (int h = 1; h <= 4; ++h) setP (p, ("harm" + juce::String (h)).toRawUTF8(), 1);   // catro armonías
         p.prepareToPlay (SR, 128);
         juce::AudioBuffer<float> buf (2, 128);
         const int blocks = (int) (seconds * SR / 128);
@@ -282,9 +283,9 @@ static void cpuBench (double seconds)
             juce::MidiBuffer m; p.processBlock (buf, m);
         }
         const double secs = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
-        const char* name = q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : "directo +5 (formantes)";
+        const char* name = q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : q == 3 ? "directo +5 (formantes)" : q == 4 ? "directo + 4 armonías" : "estudio + 4 armonías";
         std::printf ("%s: %.0f veces tempo real (%.2f %% dun núcleo)\n", name, seconds / secs, 100.0 * secs / seconds);
-        metric (std::string ("cpu.") + (q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : "directo_formantes"), 100.0 * secs / seconds);
+        metric (std::string ("cpu.") + (q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : q == 3 ? "directo_formantes" : q == 4 ? "directo_armonias" : "estudio_armonias"), 100.0 * secs / seconds);
     }
 }
 
@@ -717,6 +718,67 @@ int main (int argc, char** argv)
         std::printf ("timbre ao transpor +5 (distancia ao orixinal): esquío %.1f dB, directo %.1f dB, estudio %.1f dB\n", dc, dd, ds);
         metric ("directo.timbre5.db", dd); metric ("estudio.timbre5.db", ds);
         check ("directo +5: sen voz de esquío", dd < 0.65 * dc && dd < ds + 1.0);
+    }
+
+    // armonías: a terceira diatónica (Do maior) só pola esquerda coa voz principal
+    // apagada; en acorde MIDI, cada armonía vai á súa tecla; comparar apágaas
+    {
+        auto walk = [] (int nt, int deg) { const int mask = 0x0AB5; auto in = [&] (int v) { return (mask >> (((v % 12) + 12) % 12)) & 1; }; while (! in (nt)) --nt; const int dir = deg < 0 ? -1 : 1; for (int k = 0; k < std::abs (deg); ++k) { nt += dir; while (! in (nt)) nt += dir; } return nt; };
+        std::vector<int> want3 (voice.size());
+        { size_t k = 0; for (auto& nt : melody()) for (int i = 0; i < (int) (nt.dur * SR); ++i) want3[k++] = walk ((int) nt.midi, 2); }
+        for (int q = 0; q < 3; ++q)
+        {
+            int l = 0;
+            auto h = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", (float) q); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
+                                                                  setP (p, "principal", -48); setP (p, "harm1", 1); setP (p, "harm1_intervalo", 9); setP (p, "harm1_pan", -100); setP (p, "harm1_atraso", 0); setP (p, "harm1_desafinar", 0); }, l);
+            double err = 0, eL = 0, eR = 0; int cnt = 0, bad = 0;
+            for (int i = 0; i < h.getNumSamples(); ++i) { eL += (double) h.getSample (0, i) * h.getSample (0, i); eR += (double) h.getSample (1, i) * h.getSample (1, i); }
+            for (int64_t c = 4800; c + l < (int64_t) h.getNumSamples() - 4800 && c < (int64_t) truth.size(); c += 480)
+            {
+                if (truth[(size_t) c] < 0) continue;
+                bool stable = true;
+                for (int64_t k = c - 2400; k <= c + 2400; k += 240) if (k < 0 || k >= (int64_t) truth.size() || truth[(size_t) k] < 0 || std::abs (truth[(size_t) k] - truth[(size_t) c]) > 0.4) stable = false;
+                if (! stable) continue;
+                const double mo = measure (h.getReadPointer (0), h.getNumSamples(), c + l);
+                if (mo < 0) continue;
+                const double e = std::abs (mo - want3[(size_t) c]) * 100;
+                if (e > 50) ++bad; else { err += e; ++cnt; }
+            }
+            err /= std::max (1, cnt);
+            const double sep = 10 * std::log10 (eL / std::max (1e-20, eR));
+            const char* qn = q == 0 ? "directo" : q == 1 ? "preciso" : "estudio";
+            std::printf ("armonía 3ª arriba (%s): %.1f c da nota, %d tramas, %d fóra; esquerda/dereita %.0f dB\n", qn, err, cnt, bad, sep);
+            metric (std::string (qn) + ".armonia.cents", err);
+            check (q == 0 ? "directo: armonía na súa nota e no seu lado" : q == 1 ? "preciso: armonía na súa nota e no seu lado" : "estudio: armonía na súa nota e no seu lado",
+                   cnt > 300 && bad < cnt / 30 + 2 && err < (q == 2 ? 3.0 : 8.0) && sep > 40.0);
+        }
+        // acorde MIDI: teclas 64 e 67 todo o tempo; armonía 1 -> 64, armonía 2 -> 67
+        {
+            int l = 0;
+            std::vector<std::pair<int, int>> ev { { 0, 64 }, { 0, 67 } };
+            auto h = run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 2); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "principal", -48);
+                                                                  setP (p, "armonia_modo", 1); setP (p, "harm1", 1); setP (p, "harm1_pan", -100); setP (p, "harm2", 1); setP (p, "harm2_pan", 100);
+                                                                  setP (p, "harm1_desafinar", 0); setP (p, "harm2_desafinar", 0); }, l, ev);
+            double e1 = 0, e2 = 0; int c1 = 0, c2 = 0;
+            for (int64_t c = 9600; c + l < (int64_t) h.getNumSamples() - 4800 && c < (int64_t) truth.size(); c += 480)
+            {
+                if (truth[(size_t) c] < 0) continue;
+                const double m1 = measure (h.getReadPointer (0), h.getNumSamples(), c + l), m2 = measure (h.getReadPointer (1), h.getNumSamples(), c + l);
+                if (m1 > 0) { e1 += std::abs (m1 - 64) * 100; ++c1; }
+                if (m2 > 0) { e2 += std::abs (m2 - 67) * 100; ++c2; }
+            }
+            e1 /= std::max (1, c1); e2 /= std::max (1, c2);
+            std::printf ("acorde MIDI (Mi e Sol): armonía 1 a %.1f c de Mi, armonía 2 a %.1f c de Sol\n", e1, e2);
+            check ("acorde MIDI: cada armonía na súa tecla", c1 > 300 && c2 > 300 && e1 < 15.0 && e2 < 15.0);
+        }
+        // comparar: só a voz orixinal (sen armonías)
+        {
+            int l = 0;
+            auto cmp = run (voice, 256, 2, [&] (TuneProcessor& p) { major (p); setP (p, "comparar", 1); setP (p, "harm1", 1); setP (p, "harm2", 1); }, l);
+            float d = 0;
+            for (int i = 0; i < (int) voice.size(); ++i) d = std::max (d, std::abs (cmp.getSample (0, i + l) - voice[(size_t) i]));
+            check ("comparar: sen armonías", d < 1.0e-6f);
+        }
     }
 
     // flexibilidade: unha nota 40 cents alta a propósito queda como está; unha a 10 cents

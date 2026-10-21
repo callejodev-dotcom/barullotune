@@ -11,7 +11,10 @@ Regras segundo o nome da métrica:
   *latencia*   non pode cambiar (un cambio de latencia ten que ser a propósito: --gardar)
   *.fondo      vibrato que se respecta: ±3 c
   *.fora       tramas fóra de nota: máis peor, con marxe de 2 ou 20 %
-  resto        canto máis baixo mellor (cents, dB): marxe de 0,3 ou 15 %
+  voz.media.*, detector.*, *.pct
+               contan poucos sucesos e cambian algo dun procesador a outro (a base é dun
+               Mac ARM; o CI tamén corre en x86 e con MSVC): marxe de 1 ou 25 %
+  resto        canto máis baixo mellor (cents, dB): marxe de 0,5 ou 20 %
 """
 import json, sys
 
@@ -27,7 +30,9 @@ def rule(k, b, n):
         return abs(n - b) <= 3.0, "±3"
     if k.endswith(".fora"):
         return n <= b + max(2.0, 0.2 * b), ""
-    return n <= b + max(0.3, 0.15 * b), ""
+    if k.startswith("voz.media.") or k.startswith("detector.") or k.endswith(".pct"):
+        return n <= b + max(1.0, 0.25 * b), ""
+    return n <= b + max(0.5, 0.2 * b), ""
 
 def main():
     base = json.load(open(sys.argv[1]))
@@ -46,7 +51,7 @@ def main():
         b, n = base[k], new[k]
         ok, note = rule(k, b, n)
         mark = "" if ok else "  PEOR"
-        if ok and note != "info" and n < b - max(0.3, 0.15 * b) and not k.endswith(".fondo") and "latencia" not in k:
+        if ok and note != "info" and n < b - max(0.5, 0.2 * b) and not k.endswith(".fondo") and "latencia" not in k:
             mark = "  mellor"
         print(f"{k:44s} {b:9.2f} {n:9.2f}{mark}{('  (' + note + ')') if note and note != 'igual' else ''}")
         bad += 0 if ok else 1

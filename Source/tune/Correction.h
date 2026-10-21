@@ -23,6 +23,8 @@ struct Settings
     double transpose = 0.0;    // semitonos
     double bendRange = 2.0;    // MIDI nota: a roda de pitch bend dobra a nota ±isto
     double formant = 0.0;      // semitonos (en Directo e Preciso, coa corrección de formantes)
+    double flex = 0.0;         // 0..1: canto máis lonxe da nota, menos se corrixe (blue notes, arrastres)
+    double humanize = 0.0;     // 0..1: nas notas longas a corrección vaise relaxando
 };
 
 // ---- o modelo de corrección (o mesmo para todos os xeitos) ----
@@ -37,6 +39,7 @@ struct CorrState
     double prevCentre = 0, slope = 0;   // pendente do centro da voz (semitonos/s)
     // detector de vibrato: só se respecta unha oscilación regular (4–8 Hz, varios ciclos)
     double clock = 0, lastZc = -1e9, lastHalf = 0, vibEnv = 0, vibConf = 0; int vibSign = 0;
+    double noteAge = 0;   // mostras desde que empezou a nota (para humanizar)
 };
 
 class Corrector
@@ -59,13 +62,15 @@ public:
             st.ic1 = 0; st.ic2 = m;
             st.prevCentre = m; st.slope = 0;
             st.clock = 0; st.lastZc = -1e9; st.lastHalf = 0; st.vibEnv = 0; st.vibConf = 0; st.vibSign = 0;
+            st.noteAge = 0;
             const double err = st.tS - m;
-            st.cS = (free || std::abs (err) * 100.0 < set.tolCents) ? 0.0 : err * set.amount;
+            st.cS = (free || std::abs (err) * 100.0 < set.tolCents) ? 0.0 : err * set.amount * flexFactor (err);
             st.lastTarget = tgt;
             outMidi = m + st.cS + transpose + bend;
             return st.cS + transpose + bend;
         }
-        if (tgt != st.lastTarget) st.vibRamp = 0;   // nota nova: o vibrato volve entrar amodo
+        if (tgt != st.lastTarget) { st.vibRamp = 0; st.noteAge = 0; }   // nota nova: o vibrato volve entrar amodo
+        st.noteAge += dt;
         st.lastTarget = tgt;
         st.tS += (tgt - st.tS) * alphaFor (set.transitionMs, dt);
         st.vibRamp = std::min (1.0, st.vibRamp + dt / (0.10 * sr));
@@ -87,9 +92,9 @@ public:
         {
             const bool outside = std::abs (err) * 100.0 >= set.tolCents;
             st.tolTimer = outside ? st.tolTimer + dt : 0.0;
-            if (outside && st.tolTimer >= set.tolMs * 0.001 * sr) want = err * set.amount * (1.0 - relax);
+            if (outside && st.tolTimer >= set.tolMs * 0.001 * sr) want = err * set.amount * (1.0 - relax) * flexFactor (err);
         }
-        st.cS += (want - st.cS) * alphaFor (set.speedMs, dt);
+        st.cS += (want - st.cS) * alphaFor (speedFor (st), dt);
         outMidi = centre + st.cS + set.vibrato * vib + transpose + bend;
         return outMidi - m;
     }
@@ -128,6 +133,26 @@ public:
         if (sg != 0) st.vibSign = sg;
         // sen cruces hai máis de 160 ms: xa non é vibrato
         if ((st.clock - st.lastZc) / sr > 0.16) st.vibConf *= std::exp (-dt / (0.1 * sr));
+    }
+
+    // flexibilidade: ata «zona» cents da nota corríxese todo; de alí a 25 cents máis, cada
+    // vez menos; máis lonxe, nada (a voz vai a outro sitio a propósito). Flexibilidade 0:
+    // sempre todo; 100 %: só os últimos 5 cents
+    double flexFactor (double err) const
+    {
+        if (set.flex <= 0.0) return 1.0;
+        const double d = std::abs (err) * 100.0, zone = 60.0 * (1.0 - clampd (set.flex, 0.0, 1.0)) + 5.0;
+        const double u = clampd ((d - zone) / 25.0, 0.0, 1.0);
+        return 1.0 - u * u * (3.0 - 2.0 * u);
+    }
+
+    // humanizar: as notas curtas co tempo de «velocidade»; nas longas, despois de 150 ms,
+    // a velocidade vaise relaxando (ata +250 ms aos 500 ms), así a nota sostida respira
+    double speedFor (const CorrState& st) const
+    {
+        if (set.humanize <= 0.0) return set.speedMs;
+        const double ramp = clampd ((st.noteAge / sr - 0.15) / 0.35, 0.0, 1.0);
+        return set.speedMs + clampd (set.humanize, 0.0, 1.0) * 250.0 * ramp;
     }
 
 private:

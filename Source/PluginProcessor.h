@@ -88,7 +88,7 @@ public:
     double getTailLengthSeconds() const override { return 0.0; }
 
     // presets de fábrica: só tocan o carácter da corrección (non a tonalidade nin a voz)
-    struct Preset { const char* name; const char* description; float vel, transi, vib, tol, tolT, cant, form, trans; int quality; };
+    struct Preset { const char* name; const char* description; float vel, transi, vib, tol, tolT, cant, form, trans; int quality; float flex, human; };
     static const std::vector<Preset>& presets();
     int getNumPrograms() override { return (int) presets().size(); }
     int getCurrentProgram() override { return currentPreset; }
@@ -164,7 +164,7 @@ private:
     std::array<std::atomic<float>, 12> keyHist {};
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
-    std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass;
+    std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman;
     juce::AudioProcessorParameter* bypassParam = nullptr;
     std::array<std::atomic<float>*, 12> pNota {}, pLibre {};
 

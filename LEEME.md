@@ -25,10 +25,12 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Modos**: escala, MIDI como escala (as notas que tocas fan de escala) e MIDI nota (a voz vai á nota que tocas; a roda de pitch bend dóbraa ±2 semitonos).
 - **Afinar**: **velocidade** (canto tarda en afinar dentro da nota) e **transición** (canto tarda en pasar dunha nota á seguinte), que se poden **ligar**.
 - **Tolerancia**: desafinacións menores ca uns cents, ou máis curtas ca un tempo, non se tocan.
+- **Flexibilidade**: o contrario da tolerancia: canto máis lonxe da nota vai a voz, menos se corrixe (as blue notes, os arrastres e as notas que se buscan a propósito quedan; o que está preto, afínase).
+- **Humanizar**: as notas curtas corríxense coa velocidade de sempre; nas longas, despois de 150 ms, a corrección vaise relaxando e a nota respira.
 - **Voz**: **vibrato** de 0 a 200 % (o vibrato mantense aínda corrixindo rápido), **cantidade** de corrección e **formantes**.
 - **Saída**: transpor ±12 semitonos, La de referencia (415–466 Hz), mestura coa voz orixinal (aliñada) e volume.
 - **Efecto robot**: velocidade e transición a 0 e vibrato a 0 % (ou o preset «Robot»).
-- **Presets**: Natural, Suave, Pop, Balada, Robot, Trap, Directo seguro, Xigante e Trasno. Só cambian o carácter da corrección, non a tonalidade nin a voz; tamén aparecen no menú de presets do DAW.
+- **Presets**: Natural, Suave (con flexibilidade e humanizar), Pop, Balada (humanizada), Robot, Trap, Directo seguro, Xigante e Trasno. Só cambian o carácter da corrección, non a tonalidade nin a voz; tamén aparecen no menú de presets do DAW.
 - **Comparar**: escoita a voz sen afinar, aliñada no tempo.
 - **Estéreo de verdade**: o ton detéctase no centro e as dúas canles corríxense igual (a imaxe estéreo non se move).
 - **Xanela** de 75 % a 150 % (arrastrando a esquina); o tamaño gárdase co proxecto.
@@ -78,6 +80,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Glisandos** sintéticos (ata 40 st/s), robot: tramas con a saída a máis de 1,1 semitonos da voz: 2,6–2,9 % (antes 16–23 %).
 - **Vibrato rápido con tremor** (6,2 Hz, ±45 c, tremor de período de 0,6 % ciclo a ciclo), robot: a nota queda plana a 2,4 c en Directo (antes 6,0 c), 0,6 c en Preciso e 0,1 c en Estudio.
 - **Condicións reais**: voz moi baixa (picos a −45 dBFS), ruído rosa a 20 dB de SNR, reverberación e 96 kHz: afina igual ca coa voz limpa (con ruído a 10 dB, algo menos).
+- **Flexibilidade** 100 %: unha nota cantada 40 cents alta queda +40,0 c; unha a 10 c corríxese a +1,1 c. **Humanizar** 100 %: un vaivén lento de ±20 c nunha nota longa queda en 12,9 c de desviación (sen humanizar 0,3 c), e os primeiros 100 ms da nota corríxense igual (0,1 c).
 - **Consoantes xordas ao transpor ±7** (unha «s» entre dúas vogais): o nivel da «s» cambia como moito 2,6 dB e sen estalos (antes, en Directo baixando, ata 7,8 dB e un estalo de +19 dB). En Directo e Preciso, sen ton a voz lese a velocidade 1 e a corrección de formantes apágase (non hai nada que corrixir), a xanela da orixinal vai aliñada co punto de lectura e un limitador impide que a corrección deixe a voz máis do dobre de forte.
 - **Timbre ao transpor +5** (espectro medio en terzos de oitava, distancia ao orixinal): voz acelerada sen corrixir («esquío») 3,2 dB, Directo 1,7 dB, Estudio 1,4 dB. Nunha voz real: 12,9 dB sen corrixir, 3,5 dB en Directo, 3,2 dB en Estudio.
 - **CPU** por instancia (estéreo, 48 kHz): arredor do 3 % dun núcleo en Directo e Preciso, 2 % en Estudio e 4,5 % en Directo mentres transpón (corrección de formantes).

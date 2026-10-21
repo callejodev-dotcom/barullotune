@@ -34,6 +34,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " c"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "toltempo", 1 }, U ("Tolerancia (tempo)"), NormalisableRange<float> (0.0f, 300.0f, 0.0f, 0.5f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " ms"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "flexibilidade", 1 }, U ("Flexibilidade"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " %"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "humanizar", 1 }, U ("Humanizar"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " %"; })));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibrato", 1 }, U ("Vibrato"), NormalisableRange<float> (0.0f, 200.0f), 100.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })));
     auto pct = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; });
@@ -73,6 +77,8 @@ TuneProcessor::TuneProcessor()
     pTol = params.getRawParameterValue ("tolerancia");
     pTolT = params.getRawParameterValue ("toltempo");
     pVib = params.getRawParameterValue ("vibrato");
+    pFlex = params.getRawParameterValue ("flexibilidade");
+    pHuman = params.getRawParameterValue ("humanizar");
     pTrans = params.getRawParameterValue ("transpor");
     pLa = params.getRawParameterValue ("la");
     pMest = params.getRawParameterValue ("mestura");
@@ -183,17 +189,17 @@ void TuneProcessor::setParamPlain (const juce::String& id, float plain)
 
 const std::vector<TuneProcessor::Preset>& TuneProcessor::presets()
 {
-    //                     velocidade transición vibrato tol tolT cantidade formantes transpor xeito (-1 = non cambia)
+    //                     velocidade transición vibrato tol tolT cantidade formantes transpor xeito (-1 = non cambia) flexibilidade humanizar
     static const std::vector<Preset> p {
-        { "Natural",        "Corrección clara que respecta o vibrato. O punto de partida.",                 20,  40, 100,  0,   0, 100,  0,   0, -1 },
-        { "Suave",          "Só arranxa o que se nota: deixa as pequenas desafinacións e os adornos.",     60, 120, 100, 12,  60,  85,  0,   0, -1 },
-        { "Pop",            "Afinado e limpo, co vibrato algo contido.",                                    8,  25,  70,  0,   0, 100,  0,   0, -1 },
-        { "Balada",         "Notas longas centradas e vibrato aberto.",                                    40,  90, 120,  8,  40, 100,  0,   0, -1 },
-        { "Robot",          "O efecto clásico: salta de nota en seco e sen vibrato.",                       0,   0,   0,  0,   0, 100,  0,   0, -1 },
-        { "Trap",           "Duro, pero cun pouco de vida nas notas longas.",                               0,  12,  25,  0,   0, 100,  0,   0, -1 },
-        { "Directo seguro", "Para cantar en directo sen latencia: corrección discreta.",                   25,  50, 100,  6,  30,  90,  0,   0,  0 },
-        { "Xigante",        "Unha oitava abaixo e voz grande (en Estudio).",                                  20,  40, 100,  0,   0, 100, -4, -12,  2 },
-        { "Trasno",         "Unha oitava arriba e voz pequena (Estudio).",                                 20,  40, 100,  0,   0, 100,  4,  12,  2 },
+        { "Natural",        "Corrección clara que respecta o vibrato. O punto de partida.",                 20,  40, 100,  0,   0, 100,  0,   0, -1,  0,  0 },
+        { "Suave",          "Só arranxa o que se nota: deixa as pequenas desafinacións, os adornos e as notas que a voz busca a propósito.", 60, 120, 100, 12, 60, 85, 0, 0, -1, 40, 40 },
+        { "Pop",            "Afinado e limpo, co vibrato algo contido.",                                    8,  25,  70,  0,   0, 100,  0,   0, -1,  0,  0 },
+        { "Balada",         "Notas longas centradas que respiran, e vibrato aberto.",                      40,  90, 120,  8,  40, 100,  0,   0, -1,  0, 50 },
+        { "Robot",          "O efecto clásico: salta de nota en seco e sen vibrato.",                       0,   0,   0,  0,   0, 100,  0,   0, -1,  0,  0 },
+        { "Trap",           "Duro, pero cun pouco de vida nas notas longas.",                               0,  12,  25,  0,   0, 100,  0,   0, -1,  0, 25 },
+        { "Directo seguro", "Para cantar en directo sen latencia: corrección discreta.",                   25,  50, 100,  6,  30,  90,  0,   0,  0, 30,  0 },
+        { "Xigante",        "Unha oitava abaixo e voz grande (en Estudio).",                                  20,  40, 100,  0,   0, 100, -4, -12,  2,  0,  0 },
+        { "Trasno",         "Unha oitava arriba e voz pequena (Estudio).",                                 20,  40, 100,  0,   0, 100,  4,  12,  2,  0,  0 },
     };
     return p;
 }
@@ -216,6 +222,8 @@ void TuneProcessor::setCurrentProgram (int index)
     setParamPlain ("cantidade", pr.cant);
     setParamPlain ("formantes", pr.form);
     setParamPlain ("transpor", pr.trans);
+    setParamPlain ("flexibilidade", pr.flex);
+    setParamPlain ("humanizar", pr.human);
     if (pr.quality >= 0) setParamPlain ("calidade", (float) pr.quality);
 }
 
@@ -289,6 +297,8 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     engine.tolCents = pTol->load();
     engine.tolMs = pTolT->load();
     engine.vibrato = pVib->load() * 0.01;
+    engine.flex = pFlex->load() * 0.01;
+    engine.humanize = pHuman->load() * 0.01;
     engine.freeMask = freeMask();
     engine.transpose = std::round (pTrans->load());
     engine.refA = pLa->load();

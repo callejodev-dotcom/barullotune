@@ -719,6 +719,54 @@ int main (int argc, char** argv)
         check ("directo +5: sen voz de esquío", dd < 0.65 * dc && dd < ds + 1.0);
     }
 
+    // flexibilidade: unha nota 40 cents alta a propósito queda como está; unha a 10 cents
+    // corríxese. Humanizar: nunha nota longa, un vaivén lento (1,5 Hz, ±20 c) respírase;
+    // as notas curtas corríxense en seco igual
+    {
+        auto tone = [&] (const std::vector<double>& mid)
+        {
+            std::vector<float> v (mid.size()); double ph = 0;
+            for (size_t i = 0; i < mid.size(); ++i)
+            {
+                const double f0 = 440.0 * std::pow (2.0, (mid[i] - 69) / 12.0); ph += f0 / SR; double sm = 0;
+                for (int h = 1; h <= 30; ++h) sm += envAt (VA, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                v[i] = (float) (0.1 * sm * std::min (1.0, (double) i / (0.03 * SR)));
+            }
+            return v;
+        };
+        auto centreOf = [&] (const juce::AudioBuffer<float>& y, int l, double t0, double t1, double note, double& spread)
+        {
+            std::vector<double> ms;
+            for (int64_t c = (int64_t) (t0 * SR); c < (int64_t) (t1 * SR); c += 240) { const double mo = measure (y.getReadPointer (0), y.getNumSamples(), c + l); if (mo > 0) ms.push_back (mo); }
+            double mean = 0; for (double v : ms) mean += v; mean /= (double) std::max<size_t> (1, ms.size());
+            double var = 0; for (double v : ms) var += (v - mean) * (v - mean); spread = std::sqrt (var / (double) std::max<size_t> (1, ms.size())) * 100.0;
+            return (mean - note) * 100.0;
+        };
+        std::vector<double> far ((size_t) (1.2 * SR), 64.40), near ((size_t) (1.2 * SR), 64.10);
+        double sp = 0; int l = 0;
+        auto robotFlex = [&] (const std::vector<double>& mid, float flex)
+        {
+            return run (tone (mid), 512, 1, [&] (TuneProcessor& p) { setP (p, "calidade", 1); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "flexibilidade", flex); }, l);
+        };
+        auto f0 = robotFlex (far, 0); const double cFar0 = centreOf (f0, l, 0.3, 1.1, 64, sp);
+        auto f1 = robotFlex (far, 100); const double cFar1 = centreOf (f1, l, 0.3, 1.1, 64, sp);
+        auto n1 = robotFlex (near, 100); const double cNear1 = centreOf (n1, l, 0.3, 1.1, 64, sp);
+        std::printf ("flexibilidade: nota +40 c -> %+.1f c (sen flexibilidade %+.1f c); nota +10 c con flexibilidade 100 %% -> %+.1f c\n", cFar1, cFar0, cNear1);
+        check ("flexibilidade: deixa a nota lonxe e corrixe a de preto", std::abs (cFar0) < 3.0 && cFar1 > 30.0 && std::abs (cNear1) < 3.0);
+
+        // humanizar
+        std::vector<double> lng ((size_t) (2.4 * SR));
+        for (size_t i = 0; i < lng.size(); ++i) lng[i] = 64.0 + 0.2 * std::sin (2 * juce::MathConstants<double>::pi * 1.5 * (double) i / SR);
+        auto hum = [&] (float h) { return run (tone (lng), 512, 1, [&] (TuneProcessor& p) { setP (p, "calidade", 1); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "humanizar", h); }, l); };
+        double s0 = 0, s1 = 0, sShort = 0;
+        auto h0 = hum (0); centreOf (h0, l, 0.8, 2.3, 64, s0);
+        auto h1 = hum (100); centreOf (h1, l, 0.8, 2.3, 64, s1);
+        centreOf (h1, l, 0.03, 0.13, 64, sShort);   // o comezo da nota (curta): en seco
+        std::printf ("humanizar: vaivén de ±20 c nunha nota longa -> %.1f c (sen humanizar %.1f c); primeiros 100 ms %.1f c\n", s1, s0, sShort);
+        check ("humanizar: as notas longas respiran e as curtas non", s0 < 3.0 && s1 > 8.0 && sShort < 3.0);
+        metric ("flexibilidade.lonxe.cents", std::abs (cFar0)); metric ("flexibilidade.preto.cents", std::abs (cNear1));
+    }
+
     // consoantes xordas ao transpor ±7: a «s» sae co seu nivel e sen estalos (antes, en
     // Directo baixando, ata 11 dB máis forte e cun estalo de 10 ms na fronteira coa vogal)
     {

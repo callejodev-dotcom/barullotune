@@ -274,8 +274,21 @@ private:
                 // se o val ao dobre é claramente máis fondo ca o seu, t é medio período (unha
                 // voz grave co segundo harmónico forte): o de verdade non se pode mirar así
                 if (dmin3 (2 * t) < dmin3 (t) - 0.15) return -1;
-                prominence = mean - comb[(size_t) t];
-                return t;
+                // a familia: un período que o divide (2–5 veces) e cuxa media é case tan baixa
+                // é o de verdade (os atrasos longos teñen menos múltiplos e a normalización
+                // fainos máis fondos: unha voz aguda e aireada quedaba dúas oitavas abaixo).
+                // A metade dun período non pasa: os seus múltiplos impares son lombas
+                int pick = t;
+                for (int k = 5; k >= 2; --k)
+                {
+                    const int s0 = (int) std::lround ((double) t / k);
+                    if (s0 < tauMin + 1) continue;
+                    int sk = s0;
+                    for (int j = s0 - 1; j <= s0 + 1; ++j) if (comb[(size_t) j] < comb[(size_t) sk]) sk = j;
+                    if (comb[(size_t) sk] <= comb[(size_t) t] + 0.1 && comb[(size_t) sk] <= comb[(size_t) sk - 1] && comb[(size_t) sk] <= comb[(size_t) sk + 1]) { pick = sk; break; }
+                }
+                prominence = mean - comb[(size_t) pick];
+                return pick;
             }
         return -1;
     }

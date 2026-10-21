@@ -77,7 +77,7 @@ As armonías levan a mesma corrección e a mesma expresión ca a túa voz (vibra
 - **Volume**.
 - **Bend**: canto dobra a roda de pitch bend en MIDI nota (1–24 semitonos).
 - **Notas MIDI**: as notas que cantas saen como notas MIDI, para tocar un sintetizador coa voz.
-- **Idioma**: galego, castelán, inglés, portugués, catalán ou éuscaro. Cambia ao volver abrir a xanela; os nomes dos parámetros, ao volver cargar o plugin.
+- **Idioma**: sempre empeza en galego; tamén hai castelán, inglés, portugués, catalán e éuscaro. Cambia ao volver abrir a xanela; os nomes dos parámetros, ao volver cargar o plugin.
 
 ## Escala, notas e afinación
 

@@ -16,7 +16,7 @@ Se o sistema avisa ao abrilo:
 - **Mac:** clic dereito sobre o instalador → *Abrir* → *Abrir*.
 - **Windows:** «Windows protexeu o teu PC» → *Máis información* → *Executar de todos os xeitos*.
 
-Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada raro. (Para asinalos, ver `packaging/FIRMA.md`: o CI xa está preparado.)
+Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada raro.
 
 ## Que ten
 
@@ -24,7 +24,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Teclado**: cinco oitavas, cunha tira enriba de cada tecla que di se a nota está **na escala**, **fóra** ou **libre** (cantando nela non se corrixe). Clic para poñer ou quitar; clic dereito para deixala libre; coa afinación Personalizada, maiúsculas + arrastrar en vertical cambia os cents da nota (vense na tira). O que queda fóra do rango da voz vese máis escuro; a nota á que vai a voz acéndese.
 - **Mandos en catro pestanas**: Corrección (velocidade, transición, tolerancia, flexibilidade, humanizar, vibrato, cantidade), Voz (formantes, transpor, aire e o vibrato xerado), Armonías (a voz principal e unha fila por armonía: intervalo, nivel, panorama, desafinar, atraso e formantes) e Saída (La, mestura, volume, bend e notas MIDI).
 - **Accesibilidade e teclado**: o tabulador percorre os controis (co foco marcado en laranxa) e as frechas móvenos; cada control ten nome para os lectores de pantalla e a pantalla anuncia a nota e canto corrixe. Clic dereito (ou Cmd/Ctrl-clic, ou intro) nun mando para escribir o valor («35 ms», «−3,5 dB», «I40»…); maiúsculas ao arrastrar, fino. O teclado da escala vai sen rato: frechas (arriba e abaixo, oitavas), espazo para poñer ou quitar, F para libre e, coa afinación Personalizada, maiúsculas + arriba/abaixo para os cents.
-- **Idiomas**: galego, castelán, inglés, portugués, catalán e éuscaro (a interface e os nomes dos parámetros). Por defecto, o do sistema (ou galego); cámbiase na pestana Saída e gárdase nas preferencias. En inglés, as notas son C D E… e o Do central é C4. As traducións están en `Source/lang/Strings.h` (as de catalán e éuscaro agradecen unha revisión de alguén nativo); `tools/idiomas.py` comproba que non falte ningunha.
+- **Idiomas**: galego, castelán, inglés, portugués, catalán e éuscaro (a interface e os nomes dos parámetros). Sempre empeza en galego; os outros escóllense na pestana Saída e quedan gardados nas preferencias. En inglés, as notas son C D E… e o Do central é C4. As traducións están en `Source/lang/Strings.h` (as de catalán e éuscaro agradecen unha revisión de alguén nativo); `tools/idiomas.py` comproba que non falte ningunha.
 - **Cabeceira**: presets (os de fábrica e os teus; gardar o actual, abrir a carpeta, copiar A en B), **A/B**, comparar, **desfacer e refacer**, e o xeito.
 - **Tónica e escala** (cromática, maior, menor natural, harmónica e melódica, pentatónicas, blues e blues maior, dórica, frixia, lidia, mixolidia, locria, frixia dominante —a do flamenco—, dobre harmónica, tons enteiros, disminuída, hirajoshi ou personalizada) e **Detectar**: canta uns segundos e escolle a tonalidade. Se lle mandas a base pola **entrada lateral** («Acompañamento»), escoita tamén os acordes (o croma da base pesa un 70 %) e abonda con poñer a base, sen cantar.
 - **Afinación**: igual (os doce semitonos iguais), xusta (5-limit respecto da tónica: a terceira maior 13,7 cents baixa, a quinta 2 cents alta…) personalizada (cents de cada nota, ±50) ou **MTS-ESP** (cada nota onde diga o mestre de MTS-ESP, sen ter que repetirse por oitavas, e as notas que o mestre non usa quedan fóra; tamén as mensaxes MIDI de afinación, MTS SysEx). **Importar Scala** (.scl): a escala e os cents de cada grao desde a tónica (ata 12 graos por oitava). A decisión da nota, a corrección e as armonías van á nota coa súa afinación.
@@ -64,7 +64,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 | `tools/banco.py` | Banco de voces reais: cada voz polos tres xeitos, con cents, saltos (a saída sepárase máis de 1,6 semitonos da entrada) e perdas |
 | `tools/analise.py` | Mide a afinación dunha voz antes e despois (YIN, vibrato, centro das notas, gráfico) |
 | `tools/voces/LEEME.md` | De onde saen as voces reais das probas |
-| `packaging/` | Instaladores para Mac, Windows e Linux; `FIRMA.md`, como asinalos |
+| `packaging/` | Instaladores para Mac, Windows e Linux |
 | `docs/` | O manual; as capturas fanse soas con `tools/capturas.sh` |
 
 ## Probas
@@ -134,8 +134,8 @@ A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 - Detector de ton baseado en YIN (de Cheveigné e Kawahara, 2002). Desprazamento por TD-PSOLA (Moulines e Charpentier, 1990). Código propio.
 - Cliente de MTS-ESP de ODDSound (licenza 0BSD), en `third_party/mts-esp`.
 
-## Licencia
+## Licenza
 
-Barullo Tune es software libre: se publica bajo la licencia **GNU Affero General Public License v3.0** (archivo `LICENSE`). Puedes usarlo, estudiarlo, modificarlo y compartirlo; si distribuyes una versión modificada, tiene que ir con su código y bajo la misma licencia.
+Barullo Tune é software libre: publícase baixo a licenza **GNU Affero General Public License v3.0** (ficheiro `LICENSE`). Podes usalo, estudalo, modificalo e compartilo; se distribúes unha versión modificada, ten que ir co seu código e baixo a mesma licenza.
 
-Usa JUCE 8 bajo su licencia AGPLv3 y, para el formato CLAP, clap-juce-extensions (licencia MIT). La tipografía Barlow va con su licencia OFL (`Resources/Barlow-OFL.txt`).
+Usa JUCE 8 baixo a súa licenza AGPLv3 e, para o formato CLAP, clap-juce-extensions (licenza MIT). A tipografía Barlow vai coa súa licenza OFL (`Resources/Barlow-OFL.txt`). O instalador de Windows en galego usa a tradución non oficial de Inno Setup feita por MdL (`packaging/Galician.isl`).

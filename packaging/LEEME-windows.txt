@@ -2,14 +2,16 @@ BARULLO TUNE para Windows (64 bits)
 Unha ferramenta de Escoita · https://www.escoita.link
 
 O máis doado: executa BarulloTune-…-windows-setup.exe.
-Instala o VST3 en C:\Program Files\Common Files\VST3 (onde o buscan todos os DAW)
-e a aplicación independente en Arquivos de programa.
+Instala o VST3 en C:\Program Files\Common Files\VST3 e o CLAP en
+C:\Program Files\Common Files\CLAP (onde os buscan os DAW), e a aplicación
+independente en Arquivos de programa.
 
 Se Windows amosa «Windows protexeu o teu PC»: preme «Máis información» → «Executar de todos os xeitos».
 (Sae porque o instalador non leva sinatura de pago; non é ningún virus.)
 
 Á man, con este .zip:
   - copia o cartafol «Barullo Tune.vst3» en C:\Program Files\Common Files\VST3
+  - copia «Barullo Tune.clap» en C:\Program Files\Common Files\CLAP
   - «Barullo Tune.exe» é a aplicación: ábrese directamente.
 
 Despois, no DAW, volve buscar plugins e aparecerá «Barullo Tune» entre os efectos.

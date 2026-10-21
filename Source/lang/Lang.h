@@ -3,8 +3,8 @@
 // Os textos escríbense no código en galego, dentro de T("…"); a táboa de
 // Source/lang/Strings.h ten cada un en galego, castelán, inglés, portugués, catalán e
 // éuscaro. Se falta unha tradución, sae en galego (tools/idiomas.py compróbao).
-// O idioma é o do sistema (se é un destes) ou o galego, e pódese cambiar na interface:
-// gárdase nas preferencias do usuario. Os nomes dos parámetros cambian ao volver cargar
+// Sempre empeza en galego; pódese escoller outro na interface e gárdase nas preferencias
+// do usuario. Os nomes dos parámetros cambian ao volver cargar
 // o plugin (os DAW lense unha vez).
 #pragma once
 #include <juce_core/juce_core.h>

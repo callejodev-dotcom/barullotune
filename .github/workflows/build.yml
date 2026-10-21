@@ -78,9 +78,6 @@ jobs:
   windows:
     name: Windows (x64)
     runs-on: windows-latest
-    env:
-      # firma con Azure Trusted Signing (só se están os segredos; ver packaging/FIRMA.md)
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     defaults:
       run:
         shell: bash
@@ -110,44 +107,13 @@ jobs:
           unzip -q pv.zip
           ./pluginval.exe --strictness-level 10 --validate-in-process --skip-gui-tests \
             "build/BarulloTune_artefacts/Release/VST3/Barullo Tune.vst3"
-      - name: Asinar os binarios (só se está configurado)
-        if: env.AZURE_CLIENT_ID != ''
-        uses: azure/artifact-signing-action@v2
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
-          files-folder: ${{ github.workspace }}\build\BarulloTune_artefacts\Release
-          files-folder-filter: exe,vst3,clap
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
       - name: Instalador (Inno Setup)
         run: |
-          if ! command -v iscc >/dev/null 2>&1 && [ ! -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then choco install innosetup -y --no-progress; fi
+          choco upgrade innosetup -y --no-progress   # o galego (packaging/Galician.isl) precisa a 6.5 ou posterior
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           ART="$(cygpath -w "$PWD/build/BarulloTune_artefacts/Release")"
           OUT="$(cygpath -w "$PWD/dist")"
           "$ISCC" "//DAppVersion=$VER" "//DArtDir=$ART" "//DOutDir=$OUT" packaging/windows.iss
-      - name: Asinar o instalador (só se está configurado)
-        if: env.AZURE_CLIENT_ID != ''
-        uses: azure/artifact-signing-action@v2
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
-          files-folder: ${{ github.workspace }}\dist
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
       - name: Zip portátil
         run: |
           D="BarulloTune-$VER-windows-x64"

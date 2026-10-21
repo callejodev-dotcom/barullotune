@@ -24,17 +24,6 @@ namespace
         return o;
     }
 
-    Id fromSystem()
-    {
-        const auto l = juce::SystemStats::getUserLanguage().toLowerCase().substring (0, 2);
-        if (l == "es") return es;
-        if (l == "en") return en;
-        if (l == "pt") return pt;
-        if (l == "ca") return ca;
-        if (l == "eu") return eu;
-        return gl;   // galego tamén para as linguas que aínda non ten
-    }
-
     const std::unordered_map<std::string, const Row*>& table()
     {
         static const auto m = []
@@ -54,7 +43,7 @@ Id current()
     {
         juce::PropertiesFile f (options());
         const auto saved = f.getValue ("lang", "");
-        id = fromSystem();
+        id = gl;   // sempre en galego, agás que se escollese outro
         for (int i = 0; i < count; ++i) if (saved == nameOf ((Id) i)) id = i;
         currentId = id;
     }

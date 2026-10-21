@@ -4,6 +4,7 @@ Unha ferramenta de Escoita · https://www.escoita.link
 O máis doado: abre o instalador BarulloTune-…-mac.pkg. Instala:
   - VST3:  /Library/Audio/Plug-Ins/VST3/Barullo Tune.vst3
   - AU:    /Library/Audio/Plug-Ins/Components/Barullo Tune.component
+  - CLAP:  /Library/Audio/Plug-Ins/CLAP/Barullo Tune.clap
   - App:   /Applications/Barullo Tune.app
 
 Se macOS di que non pode comprobar o desenvolvedor:
@@ -14,6 +15,7 @@ Se macOS di que non pode comprobar o desenvolvedor:
 no Terminal, quítalle a marca de «descargado de internet»:
   xattr -cr "/Library/Audio/Plug-Ins/VST3/Barullo Tune.vst3"
   xattr -cr "/Library/Audio/Plug-Ins/Components/Barullo Tune.component"
+  xattr -cr "/Library/Audio/Plug-Ins/CLAP/Barullo Tune.clap"
   xattr -cr "/Applications/Barullo Tune.app"
 
 Despois, volve abrir o DAW e busca «Barullo Tune» entre os efectos.

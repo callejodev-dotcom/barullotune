@@ -1,12 +1,17 @@
 // Barullo Tune — detector de ton tipo YIN (sinal diezmada a ~12 kHz, cada ~4 ms).
 #pragma once
 #include "Dsp.h"
+#include <cstdlib>
+#include <cstdio>
+static inline double btE (const char* k, double d) { const char* v = std::getenv (k); return v ? std::atof (v) : d; }
 
 namespace tune {
 
 class PitchDetector
 {
 public:
+    static constexpr int numFeatures = 7;
+    static inline bool voiceModel = true;   // (false: as regras de antes; para volcar datos e axustar o modelo)
     static constexpr double allocMinHz = 60.0;
 
     void prepare (double sampleRate)
@@ -21,7 +26,11 @@ public:
         comb.assign ((size_t) tauAlloc + 4, 0.0);
         cum.assign ((size_t) tauAlloc + 4, 0.0);
         lp1.lowpass (dsr * 0.42, sr, 0.54); lp2.lowpass (dsr * 0.42, sr, 1.31);
+        hfA = 1.0 / (1.0 + 2.0 * kPi * 4000.0 / sr);   // paso alto dun polo a 4 kHz
+        lfBand.lowpass (1000.0, sr);
+        envA = 1.0 - std::exp (-1.0 / (0.004 * sr));
         hop = std::max (1, (int) std::lround (dsr * 0.004));   // ~4 ms
+        peakDecay = std::pow (10.0, -20.0 / 10.0 * hop * decim / sr);   // −20 dB/s
         setRange (75.0, 1100.0);
     }
 
@@ -36,9 +45,10 @@ public:
     void reset()
     {
         std::fill (buf.begin(), buf.end(), 0.0f);
-        lp1.reset(); lp2.reset();
+        lp1.reset(); lp2.reset(); lfBand.reset();
+        hfX = hfY = hfEnv = lfEnv = 0; peakE = 0;
         hp = 0; hpPrev = 0; pos = 0; dcount = 0; hcount = 0;
-        period = sr / 220.0; voiced = false; clarity = 0; pending = 0; misses = 0; anchor = 0; holds = 0; commonFrom = 0; commonAge = 0;
+        period = sr / 220.0; voiced = false; clarity = 0; pending = 0; pV = 0; anchor = 0; holds = 0; commonFrom = 0; commonAge = 0;
     }
 
     // devolve true cando hai unha estimación nova
@@ -47,6 +57,11 @@ public:
         // pasa altos suave (quita DC e retumbo) + paso baixo antialias
         const double h = x - hpPrev + 0.995 * hp; hpPrev = x; hp = h;
         const double y = lp2.process (lp1.process (h));
+        // agudos (por riba de 4 kHz) e graves (ata 1 kHz) á frecuencia orixinal: unha «s» ou
+        // unha «x» ten case todo arriba, e despois de diezmar xa non se ve
+        const double hf = hfA * (hfY + h - hfX); hfX = h; hfY = hf;
+        const double lf = lfBand.process (h);
+        hfEnv += (hf * hf - hfEnv) * envA; lfEnv += (lf * lf - lfEnv) * envA;
         if (++dcount < decim) return false;
         dcount = 0;
         buf[(size_t) (pos++ & (size - 1))] = (float) y;
@@ -57,6 +72,11 @@ public:
     }
 
     double hopSeconds() const { return (double) hop * decim / sr; }
+
+    // o que se mira para decidir se hai voz (tamén para axustar o modelo fóra)
+    struct Features { double x[numFeatures] {}; int cand = -1; bool accepted = false, valid = false; };
+    Features feat;
+    int64_t frames = 0;   // lecturas feitas (para ler feat unha vez por lectura)
 
     double period = 0;   // en mostras da frecuencia orixinal
     bool voiced = false;
@@ -72,7 +92,11 @@ private:
 
         double energy = 0;
         for (int j = 0; j < win; ++j) energy += (double) at (j) * at (j);
-        if (energy / win < gate) { voiced = false; pending = 0; clarity = 0; anchor = 0; commonFrom = 0; return; }
+        ++frames;
+        frameEnergy = energy / win;
+        peakE = std::max (frameEnergy, peakE * peakDecay);
+        feat = {};
+        if (energy / win < gate) { voiced = false; pending = 0; clarity = 0; anchor = 0; commonFrom = 0; pV = 0; return; }
 
         d[0] = 1.0; cum[0] = 0;
         double run = 0;
@@ -116,7 +140,7 @@ private:
             if (best >= 0 && global > 0 && std::lround ((double) best / global) >= 3 && multipleOf ((double) best, (double) global)) best = global;
         }
         const bool following = best >= 0;
-        bool combed = false;
+        bool combed = false, accepted = true;
         if (best < 0) best = global;
         if (best < 0)
         {
@@ -159,12 +183,38 @@ private:
                 if (pick < 0 && cb > 0 && prom >= combNew) pick = cb;
                 if (pick > 0) { best = pick; combed = true; }
             }
-            if (best < 0 || (d[(size_t) best] > 0.35 && ! combed))
+            // ningún val claro: o mellor candidato vai igual ao modelo de voz
+            if (best < 0 || (d[(size_t) best] > 0.35 && ! combed)) { accepted = false; best = evidence (pt); }
+        }
+        // ¿hai voz? Un filtro de dous estados (con voz / sen voz) que acumula a evidencia de
+        // lectura en lectura: a probabilidade de voz pasa á seguinte coas transicións, e cada
+        // lectura multiplícaa pola razón de verosimilitude do modelo (ver voicingLR). Así un
+        // val pouco fondo pero constante (voz aireada) segue sendo voz, e unha «s» ou un
+        // silencio apágana en dúas lecturas. Entra con 0,6 e sae con 0,4
+        {
+            if (accepted) { double pr = 0; combSearch (pr); }   // (evidence xa o calculou)
+            computeFeatures (best, accepted, pt);
+            const double lr = voicingLR (feat);
+            const double prior = pV * (1.0 - btE ("BT_A", toUnvoiced)) + (1.0 - pV) * btE ("BT_B", toVoiced);
+            pV = lr * prior / (lr * prior + 1.0 - prior);
+            // o modelo só sostén unha nota que xa sona: para empezar, as regras de sempre
+            const bool keep = voiceModel ? (voiced ? pV > btE ("BT_OUT", 0.4) : accepted && pV > btE ("BT_IN", 0.6)) : accepted;
+            if (! keep || best <= 0)
             {
-                clarity = best < 0 ? 0.0 : 1.0 - d[(size_t) best];
-                // unha soa lectura mala non apaga a voz (mantén o período anterior)
-                if (voiced && ++misses < 2) return;
+                clarity = best > 0 ? 1.0 - d[(size_t) best] : 0.0;
                 voiced = false; pending = 0; anchor = 0; commonFrom = 0; return;
+            }
+            if (accepted) weakHolds = 0;
+            if (! accepted)
+            {
+                // unha lectura feble pero con voz: o seu período só se arredor da nota que se
+                // segue; se non, mantense o de antes (un val feble lonxe adoita ser outra cousa)
+                if (feat.x[2] < 0.5)
+                {
+                    if (++weakHolds > (int) btE ("BT_HOLD", 1000)) { voiced = false; pending = 0; anchor = 0; commonFrom = 0; }
+                    return;
+                }
+                combed = true;   // (o seu período xa vén escollido: sen as regras da oitava)
             }
         }
         // cambio de nota a un múltiplo do período anterior: é o período común da nota que
@@ -192,7 +242,10 @@ private:
         // formante no segundo harmónico: a voz é case periódica a medio período), nin unha
         // abaixo (o val ao dobre do período é sempre case tan fondo coma o verdadeiro). E,
         // como se mira en cada lectura, un erro solto non queda enganchado pola continuidade.
+        const int pre = best;
         if (best > 0 && ! common && ! combed) best = following ? octaveSwitch (best) : octaveFamily (best);
+        if (std::getenv ("BT_TR")) { const double tn = (double) pos * decim / sr; if (tn >= std::atof (std::getenv ("BT_TR")) && tn < std::atof (std::getenv ("BT_TR")) + 0.08)
+            std::fprintf (stderr, "T %.3f v=%d prevHz %.0f glob %d acc %d foll %d comb %d pre %d -> %d (%.0f Hz) d=%.3f pV %.3f x=[%.2f %.2f %.0f %.2f %.2f]\n", tn, (int) voiced, voiced ? dsr / pt : 0.0, global, (int) accepted, (int) following, (int) combed, pre, best, dsr / best, d[(size_t) best], pV, feat.x[0], feat.x[1], feat.x[2], feat.x[4], feat.x[5]); }
         double tau = best;
         if (best > 1 && best < tauMax)
         {
@@ -210,12 +263,25 @@ private:
         if (! voiced)
         {
             // comezo de nota: fai falta que dúas lecturas seguidas coincidan (±0,6 semitonos)
-            if (pending > 0 && std::abs (std::log2 (p / pending)) < 0.05) { period = p; voiced = true; misses = 0; }
+            if (pending > 0 && std::abs (std::log2 (p / pending)) < 0.05) { period = p; voiced = true; }
             pending = p;
             return;
         }
         period = p;
-        misses = 0;
+    }
+
+    // Razón de verosimilitude voz / sen voz dunha lectura: regresión loxística sobre as
+    // características (tools/DetectorTest.cpp --features volca os datos e
+    // tools/axustar_voz.py axusta os pesos), dividida polas probabilidades a priori dos datos
+    static double voicingLR (const Features& f)
+    {
+        const double* x = f.x;
+        const double t[voiceTerms] = { x[0], x[1], x[2], x[4], x[5], x[6],
+                                       x[0] * x[0], x[1] * x[1], x[0] * x[1], x[2] * x[1] };
+        double z = voiceW[voiceTerms];
+        for (int i = 0; i < voiceTerms; ++i) z += voiceW[i] * t[i];
+        const double odds = std::exp (clampd (z, -30.0, 30.0)) / (voicePrior / (1.0 - voicePrior));
+        return clampd (odds, 1e-4, 1e4);
     }
 
     // seguindo unha nota (continuidade), a oitava só cambia con probas claras. (A regla
@@ -240,6 +306,50 @@ private:
             if (at > lo && at < hi && (mlt > 1.0 ? there < 0.5 * here - 0.01 : there <= here)) return at;
         }
         return best;
+    }
+
+    // o mellor candidato aínda que non chegue: arredor da nota que se segue (o da media dos
+    // múltiplos ou o val), e se non, o dos múltiplos ou o val máis fondo
+    int evidence (double pt)
+    {
+        double prom = 0;
+        const int cb = combSearch (prom);
+        const int tEnd = (tauMax - 2) / 2;
+        if (pt > 0.0)
+        {
+            const int lo = std::max (tauMin + 1, (int) std::floor (pt * 0.87)), hi = std::min (tauMax - 2, (int) std::ceil (pt * 1.15));
+            int bc = -1, bd = -1;
+            for (int t = lo; t <= hi; ++t)
+            {
+                if (t < tEnd && comb[(size_t) t] <= comb[(size_t) t - 1] && comb[(size_t) t] <= comb[(size_t) t + 1] && (bc < 0 || comb[(size_t) t] < comb[(size_t) bc])) bc = t;
+                if (d[(size_t) t] <= d[(size_t) t - 1] && d[(size_t) t] <= d[(size_t) t + 1] && (bd < 0 || d[(size_t) t] < d[(size_t) bd])) bd = t;
+            }
+            // (primeiro o val de d: o seu período afínase coa parábola; o mínimo da media dos
+            // múltiplos é un atraso enteiro, e nunha voz aguda unha mostra é un semitono)
+            if (bd > 0) return bd;
+            if (bc > 0) return bc;
+        }
+        if (cb > 0) return cb;
+        int best = -1;
+        for (int t = tauMin + 1; t < tauMax - 1; ++t)
+            if (d[(size_t) t] <= d[(size_t) t - 1] && d[(size_t) t] <= d[(size_t) t + 1] && (best < 0 || d[(size_t) t] < d[(size_t) best])) best = t;
+        return best;
+    }
+
+    // (comb e combMean xa calculados nesta lectura)
+    void computeFeatures (int c, bool accepted, double pt)
+    {
+        const int tEnd = (tauMax - 2) / 2;
+        feat.cand = c; feat.accepted = accepted; feat.valid = true;
+        auto dmin3 = [this] (int k) { return std::min ({ d[(size_t) k - 1], d[(size_t) k], d[(size_t) k + 1] }); };
+        const bool ok = c > 1 && c < tauMax - 1;
+        feat.x[0] = ok ? clampd (fracDepth (c), 0.0, 1.5) : 1.5;
+        feat.x[1] = ok ? clampd (combMean - (c < tEnd ? comb[(size_t) c] : dmin3 (c)), -0.5, 1.0) : -0.5;
+        feat.x[2] = ok && pt > 0.0 && std::abs (std::log2 (c / pt)) < 0.1 ? 1.0 : 0.0;
+        feat.x[3] = clampd (10.0 * std::log10 ((frameEnergy + 1e-20) / (peakE + 1e-20)), -60.0, 0.0) / 60.0;
+        feat.x[4] = clampd (std::log10 ((hfEnv + 1e-20) / (lfEnv + 1e-20)), -4.0, 4.0) / 4.0;
+        feat.x[5] = clampd (combMean, 0.0, 2.0);
+        feat.x[6] = accepted ? 1.0 : 0.0;
     }
 
     // Con moito aire ou ruído o val do período non baixa do limiar, pero aparece en todos
@@ -276,7 +386,7 @@ private:
                 if (dmin3 (2 * t) < dmin3 (t) - 0.15) return -1;
                 // a familia: un período que o divide (2–5 veces) e cuxa media é case tan baixa
                 // é o de verdade (os atrasos longos teñen menos múltiplos e a normalización
-                // fainos máis fondos: unha voz aguda e aireada quedaba dúas oitavas abaixo).
+                // fainos máis fondos; unha voz aguda e aireada quedaba dúas oitavas abaixo).
                 // A metade dun período non pasa: os seus múltiplos impares son lombas
                 int pick = t;
                 for (int k = 5; k >= 2; --k)
@@ -285,7 +395,7 @@ private:
                     if (s0 < tauMin + 1) continue;
                     int sk = s0;
                     for (int j = s0 - 1; j <= s0 + 1; ++j) if (comb[(size_t) j] < comb[(size_t) sk]) sk = j;
-                    if (comb[(size_t) sk] <= comb[(size_t) t] + 0.1 && comb[(size_t) sk] <= comb[(size_t) sk - 1] && comb[(size_t) sk] <= comb[(size_t) sk + 1]) { pick = sk; break; }
+                    if (comb[(size_t) sk] <= comb[(size_t) t] + btE ("BT_FAM", 0.15) && comb[(size_t) sk] <= comb[(size_t) sk - 1] && comb[(size_t) sk] <= comb[(size_t) sk + 1]) { pick = sk; break; }
                 }
                 prominence = mean - comb[(size_t) pick];
                 return pick;
@@ -397,12 +507,18 @@ private:
     // perdidas 16 -> 11 %; máis baixo, a guitarra de fondo e as voces graves daban notas)
     static constexpr double combNear = 0.4, combNew = 0.5;
     int64_t frameStart = 0;
-    Biquad lp1, lp2;
+    Biquad lp1, lp2, lfBand;
+    double hfA = 0.5, hfX = 0, hfY = 0, hfEnv = 0, lfEnv = 0, envA = 0.005, peakE = 0, peakDecay = 0.98, frameEnergy = 0;
     double hp = 0, hpPrev = 0;
     int64_t pos = 0;
     int dcount = 0, hcount = 0;
     double pending = 0;
-    int misses = 0;
+    double pV = 0;   // probabilidade de voz (filtro de dous estados)
+    int weakHolds = 0;
+    static constexpr double toVoiced = 0.02, toUnvoiced = 0.02;   // transicións por lectura (4 ms)
+    static constexpr int voiceTerms = 10;
+    static constexpr double voicePrior = 0.889043;
+    static constexpr double voiceW[voiceTerms + 1] = { -4.279169, 3.994957, 1.259783, -12.142956, -9.945671, 2.286550, -1.952468, 3.009986, -7.301386, 0.627467, 13.999692 };
     double anchor = 0;                 // período (diezmado) da última lectura clara
     int holds = 0;
     static constexpr int maxHolds = 6; // ~24 ms

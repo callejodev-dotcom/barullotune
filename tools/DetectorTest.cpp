@@ -207,6 +207,38 @@ Case hardCase (int id)
     return c;
 }
 
+// volca, por cada lectura do detector, o que mira para decidir se hai voz e se de
+// verdade a había (fóra de ±25 ms arredor dos cambios, onde a resposta é dubidosa)
+void dumpFeatures (const Case& cs, const Signal& s, FILE* f, int caseId)
+{
+    tune::Engine e;
+    e.prepare (SR);
+    e.configure (tune::Engine::Studio, cs.range);
+    double lo, hi; tune::Analysis::rangeHz (cs.range, lo, hi);
+    const int lag = (int) std::lround (SR / lo), margin = (int) (0.025 * SR);
+    int64_t last = -1;
+    for (size_t i = 0; i < s.x.size(); ++i)
+    {
+        float y;
+        e.processFrame (&s.x[i], &y, 1);
+        const auto& det = e.detector();
+        if (det.frames == last) continue;
+        last = det.frames;
+        if ((int) i < lag + margin || i + (size_t) margin >= s.x.size() + (size_t) lag || ! det.feat.valid) continue;
+        const size_t c = i - (size_t) lag;
+        const bool v = s.truth[c] >= 0;
+        bool clean = true;
+        for (int k = -margin; k <= margin && clean; k += 48)
+        {
+            const int64_t j = (int64_t) c + k;
+            if (j >= 0 && j < (int64_t) s.truth.size() && (s.truth[(size_t) j] >= 0) != v) clean = false;
+        }
+        if (! clean) continue;
+        for (int k = 0; k < tune::PitchDetector::numFeatures; ++k) std::fprintf (f, "%.5f,", det.feat.x[k]);
+        std::fprintf (f, "%d,%d\n", v ? 1 : 0, caseId);
+    }
+}
+
 struct Res { double err = 0, oct = 0, up = 0, miss = 0, falseV = 0; long outOfRange = 0; };
 
 Res evaluate (const Case& cs, const Signal& s)
@@ -275,6 +307,22 @@ int main (int argc, char** argv)
     std::setvbuf (stdout, nullptr, _IONBF, 0);
     std::string json;
     for (int a = 1; a + 1 < argc; ++a) if (std::strcmp (argv[a], "--json") == 0) json = argv[a + 1];
+    // --features f.csv a b: datos para axustar o modelo de voz, cos casos difíciles a..b
+    // (distintos dos do banco: 1000 e seguintes)
+    for (int a = 1; a + 3 < argc; ++a)
+        if (std::strcmp (argv[a], "--features") == 0)
+        {
+            FILE* f = std::fopen (argv[a + 1], "w");
+            if (f == nullptr) return 1;
+            if (std::getenv ("BT_MODELO") == nullptr) tune::PitchDetector::voiceModel = false;   // (a primeira volta, coas regras de antes)
+            for (int id = std::atoi (argv[a + 2]); id <= std::atoi (argv[a + 3]); ++id)
+            {
+                const Case c = hardCase (id);
+                dumpFeatures (c, synth (c, c.seed), f, id);
+            }
+            std::fclose (f);
+            return 0;
+        }
     // --buscar a b: os casos difíciles a..b, só para ver se algún dá un ton fóra do rango
     for (int a = 1; a + 2 < argc; ++a)
         if (std::strcmp (argv[a], "--buscar") == 0)

@@ -198,8 +198,12 @@ private:
         {
             const double a = d[(size_t) best - 1], b = d[(size_t) best], c = d[(size_t) best + 1];
             const double den = a - 2 * b + c;
-            if (den > 0) tau += 0.5 * (a - c) / den;
+            // (±0,5 como moito: o candidato dos múltiplos pode non ser un val de d, e nunha
+            // costa case recta a parábola daba calquera cousa, ata períodos negativos)
+            if (den > 0) tau += clampd (0.5 * (a - c) / den, -0.5, 0.5);
         }
+        // un período fóra do rango non é voz (e nunca pode saír de aquí)
+        if (! (tau >= tauMin - 1 && tau <= tauMax + 1)) { voiced = false; pending = 0; anchor = 0; commonFrom = 0; return; }
         clarity = 1.0 - d[(size_t) best];
         anchor = d[(size_t) best] < 0.15 ? tau : anchor;
         const double p = tau * decim;

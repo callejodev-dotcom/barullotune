@@ -2,6 +2,11 @@
 
 Unha ferramenta de [Escoita](https://www.escoita.link). Manual: [docs/MANUAL.md](https://github.com/callejodev-dotcom/barullotune/blob/main/docs/MANUAL.md).
 
+## Novidades na 0.2.2
+
+- **Arranxo importante**: cunha voz moi aireada e con ruído, a 0.2.1 podía calcular un período negativo e quedar colgada (e con ela o DAW). Xa non: o período sempre queda dentro do rango e a colocación das marcas de ciclo non pode quedar nun bucle. Un banco de 240 casos difíciles ao chou daba o fallo en 31; agora en ningún.
+- De paso, o detector erra menos coa voz aireada (1,9 % de erros, antes 2,3 %).
+
 ## Novidades na 0.2.1
 
 - **Directo sen latencia para o DAW**: declara 0 mostras (o atraso que queda é de 0,25 ms) e xa non atrasa as outras pistas.

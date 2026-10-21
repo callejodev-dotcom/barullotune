@@ -47,6 +47,8 @@ struct Case
     double reverb = 0.0;           // nivel da reverberación (0 = sen)
     double vib = 0.2;              // fondo do vibrato (semitonos)
     bool fric = false;             // consoantes xordas («s», «x», «f») nos silencios
+    double maxHz = 0;              // harmónicos ata aquí (0: ata 0,45·SR)
+    uint32_t seed = 0;             // semente do sinal (0: a da orde no banco)
     int range = tune::Analysis::General;
 };
 
@@ -71,7 +73,7 @@ Signal synth (const Case& cs, uint32_t seed)
             const double f0 = 440.0 * std::pow (2.0, (m - 69) / 12.0);
             ph += f0 / SR; if (ph > 1e6) ph -= 1e6;
             double v = 0;
-            const int H = (int) (0.45 * SR / f0);
+            const int H = (int) ((cs.maxHz > 0 ? std::min (cs.maxHz, 0.45 * SR) : 0.45 * SR) / f0);
             for (int h = 1; h <= H; ++h)
             {
                 const double gh = h == 1 ? cs.h1 : h == 2 ? cs.h2 : 1.0;
@@ -181,7 +183,31 @@ std::vector<Note> melodyGaps (double base)
     return v;
 }
 
-struct Res { double err = 0, oct = 0, up = 0, miss = 0, falseV = 0; };
+// casos difíciles ao chou, cada un da súa semente (para buscar fallos raros e repetilos):
+// paseo de intervalos, notas de 0,2 a 0,6 s, silencios, aire, ruído, consoantes, vibrato
+Case hardCase (int id)
+{
+    std::mt19937 rng (4242u + (uint32_t) id);
+    Case c; c.name = "dificil_" + std::to_string (id);
+    const double base = 40.0 + (double) (rng() % 37);
+    double m = base;
+    for (int i = 0; i < 14; ++i)
+    {
+        const int iv[] = { -7, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 7, 12, -12 };
+        m = std::max (base - 5, std::min (base + 12, m + iv[rng() % 14]));
+        const double dur = 0.2 + 0.4 * (rng() % 1000) / 1000.0, gap = (rng() % 3 == 0) ? 0.0 : 0.25 * (rng() % 1000) / 1000.0;
+        c.notes.push_back ({ m, dur, gap, (int) (rng() % 3) });
+    }
+    const double hnrs[] = { 1e9, 20.0, 10.0, 5.0, 3.0, 2.0 }, snrs[] = { 1e9, 1e9, 20.0, 10.0, 6.0 };
+    c.hnr = hnrs[rng() % 6]; c.snr = snrs[rng() % 5]; c.fric = rng() % 2 == 0;
+    c.vib = 0.1 + 0.5 * (rng() % 100) / 100.0;
+    if (rng() % 5 == 0) { c.h1 = 0.3; c.h2 = 2.0; }
+    c.maxHz = 8000;
+    c.seed = 7000u + (uint32_t) id;
+    return c;
+}
+
+struct Res { double err = 0, oct = 0, up = 0, miss = 0, falseV = 0; long outOfRange = 0; };
 
 Res evaluate (const Case& cs, const Signal& s)
 {
@@ -191,12 +217,16 @@ Res evaluate (const Case& cs, const Signal& s)
     // o detector vai atrasado (a súa xanela): compárase co ton verdadeiro de hai ~14 ms
     double lo, hi; tune::Analysis::rangeHz (cs.range, lo, hi);
     const int lag = (int) std::lround (SR / lo);
-    long nErr = 0, nOct = 0, nUp = 0, nBoth = 0, nMiss = 0, nTruth = 0, nFalse = 0, nSil = 0;
+    long nErr = 0, nOct = 0, nUp = 0, nBoth = 0, nMiss = 0, nTruth = 0, nFalse = 0, nSil = 0, outOfRange = 0;
     int sinceOnset = 0;
     for (size_t i = 0; i < s.x.size(); ++i)
     {
         float y;
         e.processFrame (&s.x[i], &y, 1);
+        // con voz, o ton sempre finito e dentro do rango (un período negativo colgaba as marcas);
+        // no detector mesmo, que a análise xa non deixa pasar un período que non vale
+        const auto& det = e.detector();
+        if (det.voiced && ! (std::isfinite (det.period) && det.period > 0.0 && SR / det.period >= lo / 1.5 && SR / det.period <= hi * 1.5)) ++outOfRange;
         if ((i % 48) != 0 || (int) i < lag) continue;   // unha trama por milisegundo
         const double tr = s.truth[i - (size_t) lag];
         const bool tv = tr >= 0;
@@ -235,6 +265,7 @@ Res evaluate (const Case& cs, const Signal& s)
     r.up = 100.0 * nUp / std::max (1L, nBoth);
     r.miss = 100.0 * nMiss / std::max (1L, nTruth);
     r.falseV = 100.0 * nFalse / std::max (1L, nSil);
+    r.outOfRange = outOfRange;
     return r;
 }
 } // namespace
@@ -244,6 +275,20 @@ int main (int argc, char** argv)
     std::setvbuf (stdout, nullptr, _IONBF, 0);
     std::string json;
     for (int a = 1; a + 1 < argc; ++a) if (std::strcmp (argv[a], "--json") == 0) json = argv[a + 1];
+    // --buscar a b: os casos difíciles a..b, só para ver se algún dá un ton fóra do rango
+    for (int a = 1; a + 2 < argc; ++a)
+        if (std::strcmp (argv[a], "--buscar") == 0)
+        {
+            long total = 0;
+            for (int id = std::atoi (argv[a + 1]); id <= std::atoi (argv[a + 2]); ++id)
+            {
+                const Case c = hardCase (id);
+                const auto r = evaluate (c, synth (c, c.seed));
+                if (r.outOfRange > 0) std::printf ("caso difícil %d: %ld mostras fóra do rango\n", id, r.outOfRange);
+                total += r.outOfRange;
+            }
+            return total > 0 ? 1 : 0;
+        }
 
     std::vector<Case> cases;
     auto add = [&] (const char* name, double base, auto&& fn) { Case c; c.name = name; c.notes = melody (base); fn (c); cases.push_back (c); };
@@ -264,15 +309,21 @@ int main (int argc, char** argv)
     // consoantes xordas entre vogais: non poden ter ton (a voz aireada tampouco as pode coller)
     add ("consoantes",       57, [] (Case& c) { c.notes = melodyGaps (57); c.fric = true; });
     add ("consoantes_aire",  60, [] (Case& c) { c.notes = melodyGaps (60); c.fric = true; c.hnr = 3.0; });
+    // moito aire, ruído e consoantes: aquí un candidato dos múltiplos que non era val de d
+    // daba un período negativo e as marcas de ciclo quedaban nun bucle sen fin
+    add ("aireada_ruido",    64, [] (Case& c) { c.notes = melodyGaps (64); c.fric = true; c.hnr = 2.0; c.snr = 4.0; c.vib = 0.4; });
+    // dous casos difíciles nos que a 0.2.1 daba períodos negativos (atopados con --buscar)
+    cases.push_back (hardCase (7)); cases.push_back (hardCase (43));
 
     std::map<std::string, double> metrics;
     std::printf ("%-18s %7s %7s %7s %7s %7s\n", "caso", "erro", "oitava", "(arriba)", "perde", "falsa");
-    double tErr = 0, tMiss = 0, tFalse = 0; int nFalse = 0;
+    double tErr = 0, tMiss = 0, tFalse = 0; int nFalse = 0; long bad = 0;
     for (size_t k = 0; k < cases.size(); ++k)
     {
-        const auto sig = synth (cases[k], 100 + (uint32_t) k);
+        const auto sig = synth (cases[k], cases[k].seed != 0 ? cases[k].seed : 100 + (uint32_t) k);
         const auto r = evaluate (cases[k], sig);
         std::printf ("%-18s %6.2f%% %6.2f%% %6.2f%%  %6.2f%% %6.2f%%\n", cases[k].name.c_str(), r.err, r.oct, r.up, r.miss, r.falseV);
+        if (r.outOfRange > 0) { std::printf ("   FALLO: %ld mostras con ton fóra do rango\n", r.outOfRange); bad += r.outOfRange; }
         metrics["detector." + cases[k].name + ".erro"] = r.err;
         metrics["detector." + cases[k].name + ".perde"] = r.miss;
         // coa reverberación, o «silencio» ten a cola da nota anterior, que si ten ton
@@ -296,5 +347,5 @@ int main (int argc, char** argv)
             std::fclose (f);
         }
     }
-    return 0;
+    return bad > 0 ? 1 : 0;
 }

@@ -105,6 +105,7 @@ public:
     double inputMidi() const { return an.inputMidi; }
     double outputMidi() const { return an.outputMidi; }
     double clarity() const { return an.detector.clarity; }
+    const PitchDetector& detector() const { return an.detector; }
     uint16_t heldPitchClasses() const { return an.midi.heldMask; }
     int targetNote() const { return an.target; }
 

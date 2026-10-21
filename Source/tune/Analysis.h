@@ -279,6 +279,8 @@ private:
     {
         const bool was = voiced;
         voiced = detector.voiced;
+        // (un período que non vale non chega ás voces: as marcas e os saltos contan con el)
+        if (voiced && ! (detector.period >= 2.0 && detector.period < 0.25 * ringSize)) voiced = false;
         if (! voiced) { decider.reset(); return; }
         curP = detector.period;
         detectedHz = sr / curP;
@@ -291,9 +293,11 @@ private:
     // marcas de análise (centros de grano), sincronizadas co ton e con precisión de fracción de mostra
     void placeMarks()
     {
-        const double P = voiced ? curP : unvoicedP;
+        // P sempre válido, e un tope de marcas por mostra: este bucle non pode quedar sen fin
+        // nunca (no fío do son, colgaría o DAW)
+        const double P = voiced && curP >= 2.0 && curP < 0.25 * ringSize ? curP : unvoicedP;
         auto X = [this] (int64_t i) { return in[(size_t) (i & (ringSize - 1))]; };
-        for (;;)
+        for (int guard = 0; guard < 64; ++guard)
         {
             const int64_t last = (int64_t) std::floor (lastMark);
             const double lastFrac = lastMark - (double) last;

@@ -83,15 +83,17 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
   | voz limpa | 1,2 % | 1,2 % |
   | segundo harmónico dominante | 21,4 % | 2,0 % |
   | sen fundamental | 0,9 % | 1,0 % |
-  | voz aireada (HNR ~5 dB) | 59,2 % | 13,9 % |
+  | voz aireada (HNR ~5 dB) | 59,2 % | 8,2 % |
   | ruído rosa a 10 dB | 11,1 % | 0,5 % |
-  | ruído rosa a 5 dB | 56,4 % | 4,7 % |
-  | reverberación longa (RT60 1,2 s) | 33,5 % | 25,4 % |
+  | ruído rosa a 5 dB | 56,4 % | 1,4 % |
+  | reverberación longa (RT60 1,2 s) | 33,5 % | 6,6 % |
   | voz grave, soprano, vibrato ancho | 0,5–1,2 % | 0,5–1,2 % |
 
   A oitava decídese mirando a familia do val elixido (a metade, o dobre e os múltiplos ata 4, e con ruído os submúltiplos ata 1/5): gaña o período máis curto que sexa case tan fondo coma o máis fondo, co fondo medido no atraso fraccionario (Lagrange cúbica), que nas voces agudas cae entre dúas mostras. Seguindo unha nota, a oitava só cambia con probas claras, para non facer saltos soltos nas voces graves reais.
+
+  Na reverberación, ao cambiar de nota a cola da anterior segue soando e as dúas xuntas repítense ao seu período común (dunha cuarta, 3 períodos da vella = 4 da nova): ese val é o máis fondo e o detector quedaba alí, dúas oitavas por debaixo, ata 200 ms. Agora un cambio a un múltiplo da nota anterior busca dentro del a nova (o submúltiplo con val de seu que non é da vella), e se aínda non o ten mantén a anterior ata 24 ms; seguindo unha nota, un val a un múltiplo dela non a fai cambiar, e se o que se segue é un múltiplo do primeiro val claro, vaise a este. Mentres soa a cola (0,4 s), a oitava non baixa ao dobre se o val de agora xa é periódico de seu. As medidas son coa serie de ruído nova, igual en todos os sistemas.
 - **Glisandos** sintéticos (ata 40 st/s), robot: tramas con a saída a máis de 1,1 semitonos da voz: 2,6–2,9 % (antes 16–23 %).
-- **Vibrato rápido con tremor** (6,2 Hz, ±45 c, tremor de período de 0,6 % ciclo a ciclo), robot: a nota queda plana a 0,9 c en Directo (antes 6,0 c), 0,7 c en Preciso e 0,1 c en Estudio. En Directo, a tendencia curta (os últimos tres cuartos de período) e o suavizado de 0,4 ms seguen mellor as subidas rápidas; sen ton, o suavizado vai a 2 ms para que a «s» non estale.
+- **Vibrato rápido con tremor** (6,2 Hz, ±45 c, tremor de período de 0,6 % ciclo a ciclo), robot: a nota queda plana a 1,1 c en Directo (antes 6,0 c), 0,3 c en Preciso e 0,1 c en Estudio. En Directo, a tendencia curta (os últimos tres cuartos de período) e o suavizado de 0,4 ms seguen mellor as subidas rápidas; sen ton, o suavizado vai a 2 ms para que a «s» non estale.
 - **Condicións reais**: voz moi baixa (picos a −45 dBFS), ruído rosa a 20 dB de SNR, reverberación e 96 kHz: afina igual ca coa voz limpa (con ruído a 10 dB, algo menos).
 - **MTS**: unha mensaxe MIDI de afinación (o Mi a 63,75) coa afinación MTS-ESP: o Mi cantado sae a −25,0 c.
 - **Tonalidade co acompañamento**: base en Re maior (Re–Sol–La–Re) pola entrada lateral e a voz cantando só un La: Re maior en 8 s. (Sumar os histogramas facía mandar a nota longa da voz, La maior; agora cada un correlaciónase cos perfís por separado. E o croma necesita barras finas: cunha FFT de 4096 os graves repartíanse entre notas veciñas e saía Fa♯ menor; con 16 384, Re maior.)

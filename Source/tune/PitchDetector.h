@@ -37,7 +37,7 @@ public:
         std::fill (buf.begin(), buf.end(), 0.0f);
         lp1.reset(); lp2.reset();
         hp = 0; hpPrev = 0; pos = 0; dcount = 0; hcount = 0;
-        period = sr / 220.0; voiced = false; clarity = 0; pending = 0; misses = 0;
+        period = sr / 220.0; voiced = false; clarity = 0; pending = 0; misses = 0; anchor = 0; holds = 0; commonFrom = 0; commonAge = 0;
     }
 
     // devolve true cando hai unha estimación nova
@@ -71,7 +71,7 @@ private:
 
         double energy = 0;
         for (int j = 0; j < win; ++j) energy += (double) at (j) * at (j);
-        if (energy / win < gate) { voiced = false; pending = 0; clarity = 0; return; }
+        if (energy / win < gate) { voiced = false; pending = 0; clarity = 0; anchor = 0; commonFrom = 0; return; }
 
         d[0] = 1.0; cum[0] = 0;
         double run = 0;
@@ -93,19 +93,26 @@ private:
                 global = t; break;
             }
         int best = -1;
+        const double pt = voiced ? period / decim : 0.0;
         // continuidade: se xa había voz, mira primeiro arredor do período anterior (±15 %)
         // para non saltar de oitava no medio dunha nota. Pero se a voz cambiou de nota
         // (o val de agora está lonxe e é claramente máis fondo), o de arredor é un val
         // falso: antes quedaba enganchado nel uns 50 ms e a nota saía unha quinta abaixo
         if (voiced)
         {
-            const double pt = period / decim;
             const int lo = std::max (tauMin, (int) std::floor (pt * 0.87)), hi = std::min (tauMax - 1, (int) std::ceil (pt * 1.15));
             int bl = -1;
             for (int t = lo; t <= hi; ++t)
                 if (t > 1 && d[(size_t) t] <= d[(size_t) t - 1] && d[(size_t) t] <= d[(size_t) t + 1] && (bl < 0 || d[(size_t) t] < d[(size_t) bl])) bl = t;
-            const bool globalClearlyBetter = global >= 0 && (global < lo || global > hi) && d[(size_t) global] < d[(size_t) std::max (bl, 0)] - 0.1;
-            if (bl >= 0 && d[(size_t) bl] < threshold + 0.12 && ! globalClearlyBetter) best = bl;
+            // un val global a 2–6 veces o período de agora non é outra nota: é un período común
+            // (cando aínda soa a nota anterior, na reverberación ou no legato, o val do período
+            // común das dúas é o máis fondo). A nota de agora segue mentres teña val de seu
+            const bool globalIsMultiple = global >= 0 && multipleOf ((double) global, pt);
+            const bool globalClearlyBetter = ! globalIsMultiple && global >= 0 && (global < lo || global > hi) && d[(size_t) global] < d[(size_t) std::max (bl, 0)] - 0.1;
+            if (bl >= 0 && d[(size_t) bl] < (globalIsMultiple ? 0.45 : threshold + 0.12) && ! globalClearlyBetter) best = bl;
+            // e ao revés: se o primeiro val claro está a un terzo (ou menos) do que se segue,
+            // o que se segue é un múltiplo, non a nota (un período común que quedou enganchado)
+            if (best >= 0 && global > 0 && std::lround ((double) best / global) >= 3 && multipleOf ((double) best, (double) global)) best = global;
         }
         const bool following = best >= 0;
         if (best < 0) best = global;
@@ -121,16 +128,35 @@ private:
                 clarity = best < 0 ? 0.0 : 1.0 - d[(size_t) best];
                 // unha soa lectura mala non apaga a voz (mantén o período anterior)
                 if (voiced && ++misses < 2) return;
-                voiced = false; pending = 0; return;
+                voiced = false; pending = 0; anchor = 0; commonFrom = 0; return;
             }
         }
+        // cambio de nota a un múltiplo do período anterior: é o período común da nota que
+        // remata (aínda soa: reverberación, legato) e da nova. A nova é un submúltiplo con val
+        // de seu que non é período da anterior (dunha cuarta, 3·vella = 4·nova, quedaba dúas
+        // oitavas abaixo ata 100 ms). A nota anterior é a da última lectura clara: no paso, o
+        // seu val xa se move
+        bool common = false;
+        const double ref = anchor > 0.0 ? anchor : pt;
+        if (best > 0 && ! following && voiced && multipleOf ((double) best, ref))
+        {
+            const int nw = newNoteIn (best, ref);
+            // a nova aínda non ten val de seu: mantense a anterior uns ms (no canto do común)
+            if (nw <= 0 && holds < maxHolds) { ++holds; return; }
+            // e se non aparece, quédase o longo (pode ser de verdade unha oitava abaixo). En
+            // calquera caso lémbrase a nota de antes uns 0,4 s, mentres a súa cola soa
+            if (nw > 0) { best = nw; common = true; }
+            commonFrom = ref; commonAge = 0;
+        }
+        else if (commonFrom > 0.0 && ++commonAge > 100) commonFrom = 0;   // ~0,4 s: a cola xa non conta
+        holds = 0;
         // A oitava: entre o val elixido e os da súa familia (a metade, o dobre, o cuádruplo
         // do período), quédase o máis curto que sexa case tan fondo coma o máis fondo. Así
         // non se queda unha oitava arriba cando o fundamental é feble (unha vogal co primeiro
         // formante no segundo harmónico: a voz é case periódica a medio período), nin unha
         // abaixo (o val ao dobre do período é sempre case tan fondo coma o verdadeiro). E,
         // como se mira en cada lectura, un erro solto non queda enganchado pola continuidade.
-        if (best > 0) best = following ? octaveSwitch (best) : octaveFamily (best);
+        if (best > 0 && ! common) best = following ? octaveSwitch (best) : octaveFamily (best);
         double tau = best;
         if (best > 1 && best < tauMax)
         {
@@ -139,6 +165,7 @@ private:
             if (den > 0) tau += 0.5 * (a - c) / den;
         }
         clarity = 1.0 - d[(size_t) best];
+        anchor = d[(size_t) best] < 0.15 ? tau : anchor;
         const double p = tau * decim;
         if (! voiced)
         {
@@ -159,6 +186,10 @@ private:
         for (double mlt : { 2.0, 0.5 })
         {
             const double t = best * mlt;
+            // o dobre non pode ser o período común coa nota de antes (aínda soa a súa cola)
+            if (mlt > 1.0 && commonFrom > 0.0 && multipleOf (t, commonFrom)) continue;
+            // e, mentres soa a cola, non se vai ao dobre se o val de agora xa é periódico de seu
+            if (mlt > 1.0 && commonFrom > 0.0 && here < threshold) continue;
             const int lo = std::max (tauMin, (int) std::floor (t * 0.96) - 1), hi = std::min (tauMax - 1, (int) std::ceil (t * 1.04) + 1);
             if (lo > hi) continue;
             int at = lo;
@@ -171,17 +202,48 @@ private:
         return best;
     }
 
+    // Dentro dun período común «tc» (múltiplo de «old», a nota que remata), a nota nova: o
+    // submúltiplo máis curto con val de seu (case tan fondo coma o máis fondo deles) que non
+    // sexa período da vella. 0 se aínda non hai
+    int newNoteIn (int tc, double old) const
+    {
+        int cand[6]; double dep[6]; int nc = 0; double dmin = 1e9;
+        for (int k = 6; k >= 2; --k)   // de curto a longo
+        {
+            const double t = (double) tc / k;
+            if (t < tauMin + 1 || multipleOf (t, old) || std::abs (t / old - 1.0) < 0.04) continue;
+            int ta = 0;
+            if (! dipAround (t, ta)) continue;
+            const double dp = fracDepth (ta);
+            if (dp < 0.45) { cand[nc] = ta; dep[nc] = dp; ++nc; dmin = std::min (dmin, dp); }
+        }
+        for (int i = 0; i < nc; ++i)
+            if (dep[i] <= 2.0 * dmin + 0.05) return cand[i];
+        return 0;
+    }
+
+    // ¿t é 2–6 veces u (±4 %)?
+    static bool multipleOf (double t, double u)
+    {
+        if (u <= 0.0) return false;
+        const double r = t / u;
+        const int k = (int) std::lround (r);
+        return k >= 2 && k <= 6 && std::abs (r - k) < 0.04 * k;
+    }
+
+    // o val máis fondo arredor de t (±4 %), se é un val de verdade e non o bordo dunha costa
+    bool dipAround (double t, int& at) const
+    {
+        const int lo = std::max (tauMin, (int) std::floor (t * 0.96) - 1), hi = std::min (tauMax - 1, (int) std::ceil (t * 1.04) + 1);
+        if (lo > hi) return false;
+        at = lo;
+        for (int k = lo; k <= hi; ++k) if (d[(size_t) k] < d[(size_t) at]) at = k;
+        return at > lo && at < hi;
+    }
+
     int octaveFamily (int best) const
     {
         int cand[8]; double dep[8]; int nc = 0;
-        auto dipAround = [this] (double t, int& at) -> bool
-        {
-            const int lo = std::max (tauMin, (int) std::floor (t * 0.96) - 1), hi = std::min (tauMax - 1, (int) std::ceil (t * 1.04) + 1);
-            if (lo > hi) return false;
-            at = lo;
-            for (int k = lo; k <= hi; ++k) if (d[(size_t) k] < d[(size_t) at]) at = k;
-            return at > lo && at < hi;   // un val de verdade, non o bordo dunha costa
-        };
         // de curto a longo: os submúltiplos (con ruído, sen ningún val por baixo do limiar,
         // o máis fondo adoita ser un múltiplo longo: 3 ou 4 períodos) e o dobre e o cuádruplo
         const double mult[8] = { 1.0 / 5.0, 1.0 / 4.0, 1.0 / 3.0, 0.5, 1.0, 2.0, 3.0, 4.0 };
@@ -245,6 +307,11 @@ private:
     int dcount = 0, hcount = 0;
     double pending = 0;
     int misses = 0;
+    double anchor = 0;                 // período (diezmado) da última lectura clara
+    int holds = 0;
+    static constexpr int maxHolds = 6; // ~24 ms
+    double commonFrom = 0;             // seguindo un período común: a nota de antes
+    int commonAge = 0;
 };
 
 } // namespace tune

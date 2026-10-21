@@ -2,6 +2,14 @@
 
 Unha ferramenta de [Escoita](https://www.escoita.link). Manual: [docs/MANUAL.md](https://github.com/callejodev-dotcom/barullotune/blob/main/docs/MANUAL.md).
 
+## Novidades na 0.2.1
+
+- **Directo sen latencia para o DAW**: declara 0 mostras (o atraso que queda é de 0,25 ms) e xa non atrasa as outras pistas.
+- **Son máis limpo en Directo e Preciso**: en cada salto de ciclo perdíase unha mostra. Agora non hai ruído entre os harmónicos ao corrixir (de −20/−40 dB a −50/−78 dB) e as notas caen máis xustas: armonías, MIDI nota e transpor quedan a menos de 0,4 cents (antes 1,2–3,5).
+- **Reverberación e legato**: ao cambiar de nota, a cola da anterior xa non leva o detector dúas oitavas abaixo (erros 20 → 6,6 %).
+- **Voz aireada e con ruído**: unha «i» aguda e chea de aire xa non queda sen afinar (erros 8,2 → 2,6 %; tramas perdidas con ruído a 5 dB, 10,8 → 5,5 %).
+- Na versión publicada da 0.2.0 faltaba o .zip do Mac; nesta vai.
+
 ## Novidades na 0.2.0
 
 - **Armonías**: ata catro voces novas a partir da túa (intervalos da escala ou acorde MIDI), cada unha co seu nivel, panorama, desafinación, atraso e formantes.

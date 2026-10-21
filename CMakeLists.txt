@@ -72,6 +72,7 @@ if(MSVC)
 endif()
 
 target_compile_definitions(BarulloTune PUBLIC
+  BARULLO_VERSION="${PROJECT_VERSION}"
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
   JUCE_VST3_CAN_REPLACE_VST2=0
@@ -87,6 +88,20 @@ target_link_libraries(BarulloTune
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+# Avisos como erros no código propio (non no de JUCE)
+option(BARULLO_WERROR "Avisos como errores en Source/ y tools/" OFF)
+set(BARULLO_OWN_SOURCES Source/PluginProcessor.cpp Source/PluginEditor.cpp tools/RenderTest.cpp)
+if(BARULLO_WERROR)
+  if(MSVC)
+    set_source_files_properties(${BARULLO_OWN_SOURCES} PROPERTIES COMPILE_OPTIONS "/WX")
+  else()
+    set_source_files_properties(${BARULLO_OWN_SOURCES} PROPERTIES COMPILE_OPTIONS "-Werror")
+  endif()
+endif()
+
+# Sanitizadores (memoria e comportamento indefinido) para a proba
+option(BARULLO_SANITIZE "Compilar la prueba con AddressSanitizer y UBSan" OFF)
+
 # Proba sen interface: voz sintética desafinada polo procesador
 option(BARULLO_TESTS "Compilar la prueba de render" OFF)
 if(BARULLO_TESTS)
@@ -96,7 +111,11 @@ if(BARULLO_TESTS)
   if(MSVC)
     target_compile_options(BTRenderTest PRIVATE /utf-8 /bigobj)
   endif()
-  target_compile_definitions(BTRenderTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BARULLO_NO_PLUGIN_ENTRY=1)
+  target_compile_definitions(BTRenderTest PRIVATE BARULLO_VERSION="${PROJECT_VERSION}" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BARULLO_NO_PLUGIN_ENTRY=1)
   target_link_libraries(BTRenderTest PRIVATE BTFonts juce::juce_audio_utils juce::juce_audio_processors juce::juce_audio_formats
-    PUBLIC juce::juce_recommended_config_flags)
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+  if(BARULLO_SANITIZE AND NOT MSVC)
+    target_compile_options(BTRenderTest PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
+    target_link_options(BTRenderTest PRIVATE -fsanitize=address,undefined)
+  endif()
 endif()

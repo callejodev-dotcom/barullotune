@@ -3,10 +3,27 @@
 // estado gardado e (con --snapshot) unha captura da interface.
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <random>
+#include <map>
+#include <cstring>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
 static const double SR = 48000.0;
+
+// métricas (para --json: o CI compáraas coa base e falla se algo empeora) e huella da
+// saída (para comprobar que un cambio de organización do código non cambia nin un bit)
+static std::map<std::string, double> metrics;
+static void metric (const std::string& k, double v) { metrics[k] = v; }
+static uint64_t outHash = 1469598103934665603ull;
+static void hashBuffer (const juce::AudioBuffer<float>& b)
+{
+    for (int c = 0; c < b.getNumChannels(); ++c)
+        for (int i = 0; i < b.getNumSamples(); ++i)
+        {
+            uint32_t u; const float v = b.getSample (c, i); std::memcpy (&u, &v, 4);
+            outHash = (outHash ^ u) * 1099511628211ull;
+        }
+}
 
 // ---------------------------------------------------------------- voz sintética
 struct Vowel { double f[3], b[3], g[3]; };
@@ -159,6 +176,7 @@ static juce::AudioBuffer<float> run (const std::vector<float>& voice, int block,
         p.processBlock (buf, midi);
         for (int c = 0; c < channels; ++c) out.copyFrom (c, pos, buf, c, 0, n);
     }
+    hashBuffer (out);
     return out;
 }
 
@@ -243,36 +261,58 @@ static int processFile (int argc, char** argv)
     return 0;
 }
 
+// tempo real por instancia: voz sintética en bucle, estéreo, bloques de 128
+static void cpuBench (double seconds)
+{
+    std::vector<double> tr;
+    const auto v = makeVoice (tr);
+    for (int q = 0; q < 4; ++q)
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 128);
+        setP (p, "calidade", (float) (q == 3 ? 0 : q));
+        if (q == 3) setP (p, "transpor", 5);   // directo transpondo: coa corrección de formantes
+        p.prepareToPlay (SR, 128);
+        juce::AudioBuffer<float> buf (2, 128);
+        const int blocks = (int) (seconds * SR / 128);
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 128; ++i) buf.setSample (c, i, v[(size_t) ((b * 128 + i) % (int) v.size())]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+        }
+        const double secs = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+        const char* name = q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : "directo +5 (formantes)";
+        std::printf ("%s: %.0f veces tempo real (%.2f %% dun núcleo)\n", name, seconds / secs, 100.0 * secs / seconds);
+        metric (std::string ("cpu.") + (q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : "directo_formantes"), 100.0 * secs / seconds);
+    }
+}
+
+static void writeJson (const juce::File& f)
+{
+    juce::String s ("{\n");
+    int i = 0;
+    for (auto& kv : metrics)
+        s << "  \"" << kv.first << "\": " << juce::String (kv.second, 4) << (++i < (int) metrics.size() ? ",\n" : "\n");
+    s << "}\n";
+    f.replaceWithText (s);
+    std::printf ("JSON: %s\n", f.getFullPathName().toRawUTF8());
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 3 && juce::String (argv[1]) == "--file") return processFile (argc, argv);
-    if (argc > 1 && juce::String (argv[1]) == "--cpu")
-    {
-        // tempo real por instancia: voz sintética en bucle, estéreo, bloques de 128
-        std::vector<double> tr;
-        const auto v = makeVoice (tr);
-        for (int q = 0; q < 4; ++q)
-        {
-            TuneProcessor p;
-            p.setPlayConfigDetails (2, 2, SR, 128);
-            setP (p, "calidade", (float) (q == 3 ? 0 : q));
-            if (q == 3) setP (p, "transpor", 5);   // directo transpondo: coa corrección de formantes
-            p.prepareToPlay (SR, 128);
-            juce::AudioBuffer<float> buf (2, 128);
-            const int blocks = (int) (20.0 * SR / 128);
-            const auto t0 = juce::Time::getMillisecondCounterHiRes();
-            for (int b = 0; b < blocks; ++b)
-            {
-                for (int c = 0; c < 2; ++c) for (int i = 0; i < 128; ++i) buf.setSample (c, i, v[(size_t) ((b * 128 + i) % (int) v.size())]);
-                juce::MidiBuffer m; p.processBlock (buf, m);
-            }
-            const double secs = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
-            std::printf ("%s: %.0f veces tempo real (%.2f %% dun núcleo)\n", q == 0 ? "directo" : q == 1 ? "preciso" : q == 2 ? "estudio" : "directo +5 (formantes)", 20.0 / secs, 100.0 * secs / 20.0);
-        }
-        return 0;
-    }
+    if (argc > 1 && juce::String (argv[1]) == "--cpu") { cpuBench (20.0); return 0; }
     if (argc > 2 && juce::String (argv[1]) == "--snapshot") { snapshot (juce::File { juce::String (argv[2]) }); return 0; }
+    // BTRenderTest [saida.wav] [--json metricas.json]
+    juce::String wavOut, jsonOut;
+    for (int a = 1; a < argc; ++a)
+    {
+        const juce::String arg (argv[a]);
+        if (arg == "--json" && a + 1 < argc) jsonOut = argv[++a];
+        else wavOut = arg;
+    }
 
     std::vector<double> truth;
     const auto voice = makeVoice (truth);
@@ -293,6 +333,8 @@ int main (int argc, char** argv)
         auto s = evaluate (rb, lat, truth, 0);
         std::printf ("robot:   entrada %.1f c -> saída %.1f c (máx %.1f c), %d tramas, %d fóra de nota | latencia %d mostras (%.2f ms)\n",
                      s.inC, s.outC, s.maxC, s.frames, s.wrong, lat, 1000.0 * lat / SR);
+        const std::string M (qn);
+        metric (M + ".robot.cents", s.outC); metric (M + ".robot.fora", s.wrong); metric (M + ".latencia.ms", 1000.0 * lat / SR);
         check (q == 0 ? "directo robot: menos de 8 cents de media" : q == 1 ? "preciso robot: menos de 3 cents de media" : "estudio robot: menos de 3 cents de media",
                s.outC < (q == 0 ? 8.0 : 3.0) && s.wrong < s.frames / 30 + 2);
         if (q == 0) check ("directo: latencia de menos de 1 ms", lat < SR * 0.001);
@@ -302,6 +344,7 @@ int main (int argc, char** argv)
         auto nt = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 60); setP (p, "transicion", 120); }, lat);
         s = evaluate (nt, lat, truth, 0);
         std::printf ("natural: entrada %.1f c -> saída %.1f c (máx %.1f c)\n", s.inC, s.outC, s.maxC);
+        metric (M + ".natural.cents", s.outC);
         check ("natural: corrixe (menos da metade da desafinación)", s.outC < 0.5 * s.inC);
 
         // vibrato de verdade: unha nota longa (2,4 s) 25 cents baixa cun vibrato regular de
@@ -338,6 +381,8 @@ int main (int argc, char** argv)
             double c1, d1, c0, d0;
             stats (v100, l1, c1, d1); stats (v0, l2, c0, d0);
             std::printf ("vibrato: entrada 25 c baixa e ±30 c | vibrato 100 %%: centro %+.1f c, ±%.1f c | vibrato 0 %%: centro %+.1f c, ±%.1f c\n", c1, d1, c0, d0);
+            metric (M + ".vibrato100.centro.cents", std::abs (c1)); metric (M + ".vibrato100.fondo", d1);
+            metric (M + ".vibrato0.centro.cents", std::abs (c0)); metric (M + ".vibrato0.fondo.cents", d0);
             check ("vibrato 100 %: enteiro e centrado; 0 %: plano", std::abs (c1) < 4.0 && d1 > 22.0 && d1 < 38.0 && std::abs (c0) < 4.0 && d0 < 6.0);
         }
 
@@ -376,9 +421,10 @@ int main (int argc, char** argv)
                 return std::sqrt (acc / std::max (1, cnt)) * 100.0;
             };
             int lw = 0;
-            auto nat = run (wn, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); }, lw);   // Natural (por defecto)
-            const double sin_ = spread (wn.data(), (int) wn.size(), 0), sout = spread (nat.getReadPointer (0), nat.getNumSamples(), lw);
+            auto natw = run (wn, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); }, lw);   // Natural (por defecto)
+            const double sin_ = spread (wn.data(), (int) wn.size(), 0), sout = spread (natw.getReadPointer (0), natw.getNumSamples(), lw);
             std::printf ("inseguridade: desviación da nota %.1f c -> %.1f c (Natural)\n", sin_, sout);
+            metric (M + ".inseguridade.cents", sout);
             check ("Natural corrixe a inseguridade (non a toma por vibrato)", sout < 0.5 * sin_);
         }
 
@@ -412,6 +458,7 @@ int main (int argc, char** argv)
             }
             const double rin = std::sqrt (ain / std::max (1, cnt)) * 100.0, rout = std::sqrt (acc / std::max (1, cnt)) * 100.0;
             std::printf ("voz con vibrato rápido e tremor, robot: %.1f c -> %.1f c da nota\n", rin, rout);
+            metric (M + ".tremor.cents", rout);
             const double lim = q == 0 ? 4.0 : 1.5;   // antes do ton deslizante: directo 6,0 c, preciso 1,8 c
             check (q == 0 ? "directo: vibrato rápido aplanado (menos de 4 c)" : q == 1 ? "preciso: vibrato rápido aplanado (menos de 1,5 c)" : "estudio: vibrato rápido aplanado (menos de 1,5 c)", rout < lim);
         }
@@ -430,6 +477,7 @@ int main (int argc, char** argv)
         auto t5 = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "transpor", 5); }, lat);
         s = evaluate (t5, lat, truth, 5);
         std::printf ("+5 st:   saída %.1f c (máx %.1f c), %d fóra de nota\n", s.outC, s.maxC, s.wrong);
+        metric (M + ".transpor5.cents", s.outC); metric (M + ".transpor5.fora", s.wrong);
         check ("transpor +5: notas certas", s.outC < 8.0 && s.wrong < s.frames / 30 + 2);
 
         // MIDI nota: unha terceira por riba da melodía
@@ -440,6 +488,7 @@ int main (int argc, char** argv)
             auto mid = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "modo", 2); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, lat, ev);
             s = evaluate (mid, lat, truth, 4);
             std::printf ("MIDI:    saída %.1f c (máx %.1f c), %d fóra de nota\n", s.outC, s.maxC, s.wrong);
+            metric (M + ".midi.cents", s.outC); metric (M + ".midi.fora", s.wrong);
             check ("MIDI nota: segue o teclado", s.outC < 8.0 && s.wrong < s.frames / 20 + 2);
         }
 
@@ -507,6 +556,7 @@ int main (int argc, char** argv)
         int lat2 = p.getLatencySamples();
         auto sl = evaluate (outL, lat2, truth, 0);
         std::printf ("estéreo %s: esquerda %.1f c, nivel dereita/esquerda %.3f (agardado 0,600)\n", q == 0 ? "directo" : "estudio", sl.outC, std::sqrt (er / el));
+        metric (std::string (q == 0 ? "directo" : "estudio") + ".estereo.cents", sl.outC);
         check (q == 0 ? "directo: estéreo corrixido igual nas dúas canles" : "estudio: estéreo corrixido igual nas dúas canles",
                sl.outC < (q == 0 ? 8.0 : 3.0) && std::abs (std::sqrt (er / el) - 0.6) < 0.03);
     }
@@ -529,6 +579,7 @@ int main (int argc, char** argv)
         y.applyGain (100.0f);
         auto sq = evaluate (y, l, truth, 0);
         std::printf ("voz a -40 dB: saída %.1f c, %d tramas\n", sq.outC, sq.frames);
+        metric ("directo.baixa40db.cents", sq.outC);
         check ("voz baixa (-40 dB): afínaa igual", sq.frames > 400 && sq.outC < 8.0);
     }
 
@@ -547,6 +598,7 @@ int main (int argc, char** argv)
         };
         const double c0 = centroid (base), c1 = centroid (up);
         std::printf ("formantes +4: saída %.1f c, brillo %.0f Hz -> %.0f Hz\n", s.outC, c0, c1);
+        metric ("estudio.formantes4.cents", s.outC);
         check ("formantes +4: mesma nota e timbre máis brillante", s.outC < 4.0 && c1 > c0 * 1.12);
     }
 
@@ -559,7 +611,7 @@ int main (int argc, char** argv)
         p.setPlayConfigDetails (2, 2, SR, 512);
         setP (p, "modo", 2); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
         p.prepareToPlay (SR, 512);
-        const int lat = p.getLatencySamples(), total = (int) voice.size() + lat;
+        const int lb = p.getLatencySamples(), total = (int) voice.size() + lb;
         juce::AudioBuffer<float> out (2, total), buf (2, 512);
         size_t k = 0;
         for (int pos = 0; pos < total; pos += 512)
@@ -578,8 +630,9 @@ int main (int argc, char** argv)
             p.processBlock (buf, midi);
             for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, buf, c, 0, nn);
         }
-        auto sb = evaluate (out, lat, truth, 2);
+        auto sb = evaluate (out, lb, truth, 2);
         std::printf ("MIDI + bend: saída %.1f c, %d fóra de nota\n", sb.outC, sb.wrong);
+        metric ("directo.bend.cents", sb.outC);
         check ("pitch bend en MIDI nota: +2 semitonos", sb.outC < 8.0 && sb.wrong < sb.frames / 20 + 2);
     }
 
@@ -610,7 +663,7 @@ int main (int argc, char** argv)
             return std::sqrt (d / (double) a.size());
         };
         const double r = std::pow (2.0, 5.0 / 12.0);
-        std::vector<float> chip ((size_t) (voice.size() / r));
+        std::vector<float> chip ((size_t) ((double) voice.size() / r));
         for (size_t i = 0; i < chip.size(); ++i)
         {
             const double p = (double) i * r; const size_t i0 = (size_t) p; const float f = (float) (p - (double) i0);
@@ -624,6 +677,7 @@ int main (int argc, char** argv)
         const double dd = dist (eo, bands (d5.getReadPointer (0), d5.getNumSamples()));
         const double ds = dist (eo, bands (s5.getReadPointer (0), s5.getNumSamples()));
         std::printf ("timbre ao transpor +5 (distancia ao orixinal): esquío %.1f dB, directo %.1f dB, estudio %.1f dB\n", dc, dd, ds);
+        metric ("directo.timbre5.db", dd); metric ("estudio.timbre5.db", ds);
         check ("directo +5: sen voz de esquío", dd < 0.65 * dc && dd < ds + 1.0);
     }
 
@@ -633,6 +687,7 @@ int main (int argc, char** argv)
         run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 2); setP (p, "rango", 0); }, lg);
         run (voice, 512, 2, [&] (TuneProcessor& p) { setP (p, "calidade", 2); setP (p, "rango", 5); }, la);
         std::printf ("estudio: latencia baixo %.1f ms, soprano %.1f ms\n", 1000.0 * lg / SR, 1000.0 * la / SR);
+        metric ("estudio.latencia.baixo.ms", 1000.0 * lg / SR); metric ("estudio.latencia.soprano.ms", 1000.0 * la / SR);
         check ("rango agudo: menos latencia", la < lg / 2);
     }
 
@@ -682,15 +737,15 @@ int main (int argc, char** argv)
     // presets: Robot pon velocidade, transición e vibrato a 0; o preset gárdase co estado
     {
         TuneProcessor a;
-        int robot = -1;
-        for (int i = 0; i < a.getNumPrograms(); ++i) if (a.getProgramName (i) == "Robot") robot = i;
-        a.setCurrentProgram (robot);
-        const bool ok1 = robot >= 0 && a.params.getRawParameterValue ("velocidade")->load() < 0.5f
+        int robotIdx = -1;
+        for (int i = 0; i < a.getNumPrograms(); ++i) if (a.getProgramName (i) == "Robot") robotIdx = i;
+        a.setCurrentProgram (robotIdx);
+        const bool ok1 = robotIdx >= 0 && a.params.getRawParameterValue ("velocidade")->load() < 0.5f
                       && a.params.getRawParameterValue ("transicion")->load() < 0.5f && a.params.getRawParameterValue ("vibrato")->load() < 0.5f;
         juce::MemoryBlock mb; a.getStateInformation (mb);
         TuneProcessor b; b.setStateInformation (mb.getData(), (int) mb.getSize());
-        std::printf ("presets: %d, Robot = %d\n", a.getNumPrograms(), robot);
-        check ("presets: Robot aplícase e gárdase", ok1 && b.getCurrentProgram() == robot);
+        std::printf ("presets: %d, Robot = %d\n", a.getNumPrograms(), robotIdx);
+        check ("presets: Robot aplícase e gárdase", ok1 && b.getCurrentProgram() == robotIdx);
     }
 
     // estado
@@ -721,12 +776,155 @@ int main (int argc, char** argv)
         check (q == 0 ? "directo: silencio e ruído sen valores raros" : q == 1 ? "preciso: silencio e ruído sen valores raros" : "estudio: silencio e ruído sen valores raros", finite && mx < 2.0f);
     }
 
-    if (argc > 1)
+    // bypass: a voz orixinal, atrasada exactamente a latencia (o DAW compénsaa igual ca co efecto)
+    for (int q = 0; q < 3; ++q)
     {
-        const juce::File f { juce::String (argv[1]) };
+        int l = 0;
+        auto byp = run (voice, 256, 2, [&] (TuneProcessor& p) { setP (p, "calidade", (float) q); major (p); setP (p, "bypass", 1); }, l);
+        float d = 0;
+        for (int i = 0; i < (int) voice.size(); ++i) d = std::max (d, std::abs (byp.getSample (1, i + l) - voice[(size_t) i]));
+        // e o bypass do DAW (processBlockBypassed) fai o mesmo
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 256);
+        setP (p, "calidade", (float) q);
+        p.prepareToPlay (SR, 256);
+        const int lh = p.getLatencySamples(), total = (int) voice.size() + lh;
+        juce::AudioBuffer<float> buf (2, 256);
+        float dh = 0;
+        for (int pos = 0; pos < total; pos += 256)
+        {
+            const int nn = juce::jmin (256, total - pos);
+            buf.setSize (2, nn, false, false, true);
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < nn; ++i) buf.setSample (c, i, pos + i < (int) voice.size() ? voice[(size_t) (pos + i)] : 0.0f);
+            juce::MidiBuffer m;
+            p.processBlockBypassed (buf, m);
+            for (int i = 0; i < nn; ++i)
+                if (pos + i - lh >= (int) (0.03 * SR) && pos + i - lh < (int) voice.size())   // despois do fundido de entrada (20 ms)
+                    dh = std::max (dh, std::abs (buf.getSample (0, i) - voice[(size_t) (pos + i - lh)]));
+        }
+        check (q == 0 ? "directo: bypass = orixinal aliñada" : q == 1 ? "preciso: bypass = orixinal aliñada" : "estudio: bypass = orixinal aliñada", d < 1.0e-6f && dh < 1.0e-6f);
+    }
+
+    // estado de Barullo Tune 0.1 (sen versión, sen bypass, preset só por número): o bypass
+    // volve ao valor de fábrica aínda que a instancia o tivese aceso, e o resto chega igual
+    {
+        TuneProcessor a;
+        setP (a, "velocidade", 123); setP (a, "tonica", 9);
+        a.setCurrentProgram (4);
+        setP (a, "velocidade", 123);
+        juce::MemoryBlock mb; a.getStateInformation (mb);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+        xml->removeAttribute ("version"); xml->removeAttribute ("presetName"); xml->removeAttribute ("plugin");
+        if (auto* e = xml->getChildByAttribute ("id", "bypass")) xml->removeChildElement (e, true);
+        juce::MemoryBlock old; juce::AudioProcessor::copyXmlToBinary (*xml, old);
+        TuneProcessor b;
+        setP (b, "bypass", 1);
+        b.setStateInformation (old.getData(), (int) old.getSize());
+        const bool ok1 = b.params.getRawParameterValue ("bypass")->load() < 0.5f
+                      && std::abs (b.params.getRawParameterValue ("velocidade")->load() - 123.0f) < 0.01f
+                      && (int) b.params.getRawParameterValue ("tonica")->load() == 9 && b.getCurrentProgram() == 4;
+        // o preset búscase polo nome
+        xml->setAttribute ("preset", 0); xml->setAttribute ("presetName", "Robot");
+        juce::MemoryBlock named; juce::AudioProcessor::copyXmlToBinary (*xml, named);
+        TuneProcessor c; c.setStateInformation (named.getData(), (int) named.getSize());
+        check ("estado de 0.1: migra (bypass de fábrica, preset polo nome)", ok1 && c.getProgramName (c.getCurrentProgram()) == "Robot");
+        // estados rotos ou truncados: non pasa nada
+        TuneProcessor d;
+        std::mt19937 rr (9);
+        for (int k = 0; k < 200; ++k)
+        {
+            juce::MemoryBlock junk (mb);
+            const int cut = (int) (rr() % (unsigned) mb.getSize());
+            junk.setSize ((size_t) cut);
+            if (k % 2) for (int j = 0; j < 8 && cut > 0; ++j) static_cast<char*> (junk.getData())[rr() % (unsigned) cut] = (char) rr();
+            d.setStateInformation (junk.getData(), (int) junk.getSize());
+        }
+        check ("estados rotos: sen problemas", true);
+    }
+
+    // automatización ao chou: todos os parámetros, bloques de 1 a 1024 mostras, MIDI, cambios
+    // de xeito e de frecuencia de mostraxe, con voz, ruído, silencio, continua, cadrada a 0 dBFS
+    // e impulsos. Nada pode saír non finito nin disparado.
+    {
+        std::mt19937 rr (1234);
+        std::uniform_real_distribution<float> u01 (0.0f, 1.0f), u11 (-1.0f, 1.0f);
+        TuneProcessor p;
+        double sr = SR;
+        p.setPlayConfigDetails (2, 2, sr, 1024);
+        p.prepareToPlay (sr, 1024);
+        juce::AudioBuffer<float> buf (2, 1024);
+        bool finite = true; float peak = 0; int blocks = 0;
+        const int64_t total = (int64_t) (SR * 60.0);
+        int64_t pos = 0; double ph = 0;
+        while (pos < total)
+        {
+            const int nn = (rr() % 8 == 0) ? 1 + (int) (rr() % 8) : 1 + (int) (rr() % 1024);
+            if (rr() % 12 == 0)
+                for (auto* prm : p.getParameters()) if (rr() % 4 == 0) prm->setValueNotifyingHost (u01 (rr));
+            if (rr() % 400 == 0)
+            {
+                const double rates[] = { 44100.0, 48000.0, 88200.0, 96000.0, 192000.0, 22050.0 };
+                sr = rates[rr() % 6];
+                p.setPlayConfigDetails (2, 2, sr, 1024);
+                p.prepareToPlay (sr, 1024);
+            }
+            buf.setSize (2, nn, false, false, true);
+            const int kind = (int) ((pos / (int64_t) (SR * 1.5)) % 7);
+            for (int i = 0; i < nn; ++i)
+            {
+                float v = 0;
+                const int64_t t = pos + i;
+                switch (kind)
+                {
+                    case 0: v = voice[(size_t) (t % (int64_t) voice.size())]; break;
+                    case 1: v = 0.5f * u11 (rr); break;
+                    case 2: v = 0; break;
+                    case 3: v = 0.7f; break;
+                    case 4: ph += 180.0 / sr; v = std::fmod (ph, 1.0) < 0.5 ? 1.0f : -1.0f; break;
+                    case 5: v = (t % 997 == 0) ? 1.0f : 0.0f; break;
+                    default: v = voice[(size_t) (t % (int64_t) voice.size())] * 8.0f; break;   // saturada
+                }
+                buf.setSample (0, i, v);
+                buf.setSample (1, i, (rr() % 2) ? v : -v * 0.5f);
+            }
+            juce::MidiBuffer midi;
+            if (rr() % 6 == 0)
+            {
+                const int at = (int) (rr() % (unsigned) nn), note = 24 + (int) (rr() % 72);
+                switch (rr() % 5)
+                {
+                    case 0: case 1: midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), at); break;
+                    case 2: midi.addEvent (juce::MidiMessage::noteOff (1, note), at); break;
+                    case 3: midi.addEvent (juce::MidiMessage::pitchWheel (1, (int) (rr() % 16384)), at); break;
+                    default: midi.addEvent (juce::MidiMessage::allNotesOff (1), at); break;
+                }
+            }
+            if (rr() % 50 == 0) p.processBlockBypassed (buf, midi); else p.processBlock (buf, midi);
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < nn; ++i)
+                {
+                    const float v = buf.getSample (c, i);
+                    if (! std::isfinite (v)) finite = false; else peak = std::max (peak, std::abs (v));
+                }
+            pos += nn; ++blocks;
+        }
+        std::printf ("automatización ao chou: %d bloques, pico %.2f\n", blocks, peak);
+        check ("automatización ao chou: sempre finito e sen disparar", finite && peak < 64.0f);
+    }
+
+    if (wavOut.isNotEmpty())
+    {
+        const juce::File f { wavOut };
         writeWav (f, robot);
         writeWav (f.getSiblingFile (f.getFileNameWithoutExtension() + "_natural.wav"), nat);
         writeWav (f.getSiblingFile (f.getFileNameWithoutExtension() + "_mais5.wav"), tr);
+    }
+    std::printf ("huella da saída: %016llx\n", (unsigned long long) outHash);
+    if (jsonOut.isNotEmpty())
+    {
+        cpuBench (5.0);
+        metric ("fallos", fails);
+        writeJson (juce::File::getCurrentWorkingDirectory().getChildFile (jsonOut));
     }
     std::printf (fails == 0 ? "TODO OK\n" : "%d FALLOS\n", fails);
     return fails;

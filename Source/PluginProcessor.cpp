@@ -52,6 +52,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
         StringArray { U ("Baixo"), U ("Barítono"), U ("Tenor"), U ("Alto"), U ("Mezzo"), U ("Soprano"), U ("Calquera") }, 6,
         AudioParameterChoiceAttributes().withAutomatable (false)));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "comparar", 1 }, U ("Comparar (voz orixinal)"), false));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, U ("Bypass"), false));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "formantes", 1 }, U ("Formantes"), NormalisableRange<float> (-7.0f, 7.0f, 0.1f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.05f ? String ("0") : (v > 0 ? "+" : "") + String (v, 1); })));
     return l;
@@ -80,6 +81,8 @@ TuneProcessor::TuneProcessor()
     pRango = params.getRawParameterValue ("rango");
     pForm = params.getRawParameterValue ("formantes");
     pComp = params.getRawParameterValue ("comparar");
+    pBypass = params.getRawParameterValue ("bypass");
+    bypassParam = params.getParameter ("bypass");
     for (int i = 0; i < 12; ++i) pNota[(size_t) i] = params.getRawParameterValue ("nota" + juce::String (i));
     for (int i = 0; i < 12; ++i) pLibre[(size_t) i] = params.getRawParameterValue ("libre" + juce::String (i));
     for (auto& h : keyHist) h = 0;
@@ -142,6 +145,7 @@ void TuneProcessor::prepareToPlay (double sr, int)
     dryPos = 0;
     mixSm.reset (sr, 0.03); mixSm.setCurrentAndTargetValue (pComp->load() > 0.5f ? 0.0f : pMest->load() * 0.01f);
     gainSm.reset (sr, 0.03); gainSm.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVol->load()));
+    bypassSm.reset (sr, 0.02); bypassSm.setCurrentAndTargetValue (pBypass->load() > 0.5f ? 1.0f : 0.0f);
     frameCount = 0; levelAcc = 0;
     fifo.reset();
 }
@@ -253,7 +257,12 @@ void TuneProcessor::pushFrame()
     }
 }
 
-void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) { process (buffer, midi, false); }
+void TuneProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) { process (buffer, midi, true); }
+
+// O motor segue traballando en bypass (así, ao volver, non hai que agardar a que
+// recoñeza a voz) e a saída funde coa voz orixinal atrasada a latencia.
+void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, bool hostBypass)
 {
     juce::ScopedNoDenormals noDenormals;
     const int numCh = buffer.getNumChannels(), numIn = juce::jmin (numCh, getTotalNumInputChannels());
@@ -275,6 +284,7 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     engine.refA = pLa->load();
     mixSm.setTargetValue (pComp->load() > 0.5f ? 0.0f : pMest->load() * 0.01f);   // comparar: a voz sen tocar
     gainSm.setTargetValue (juce::Decibels::decibelsToGain (pVol->load()));
+    bypassSm.setTargetValue (hostBypass || pBypass->load() > 0.5f ? 1.0f : 0.0f);
 
     auto it = midi.cbegin();
     const auto end = midi.cend();
@@ -299,13 +309,14 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
         engine.processFrame (x, wet, ech);
         int rd = dryPos - lat; if (rd < 0) rd += dsz;
-        const float mix = mixSm.getNextValue(), g = gainSm.getNextValue();
+        const float mix = mixSm.getNextValue(), g = gainSm.getNextValue(), byp = bypassSm.getNextValue();
         float peakIn = 0, peakOut = 0;
         for (int c = 0; c < ech; ++c)
         {
             dry[(size_t) c][(size_t) dryPos] = x[c];
             const float dx = dry[(size_t) c][(size_t) rd];
-            const float y = (dx + (wet[c] - dx) * mix) * g;
+            float y = (dx + (wet[c] - dx) * mix) * g;
+            if (byp > 0.0f) y = byp >= 1.0f ? dx : y + (dx - y) * byp;
             buffer.getWritePointer (c)[i] = y;
             peakIn = juce::jmax (peakIn, std::abs (x[c])); peakOut = juce::jmax (peakOut, std::abs (y));
         }
@@ -333,21 +344,51 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
 void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
+    params.state.setProperty ("version", stateVersion, nullptr);
+    params.state.setProperty ("plugin", BARULLO_VERSION, nullptr);
     params.state.setProperty ("preset", currentPreset, nullptr);
+    params.state.setProperty ("presetName", getProgramName (currentPreset), nullptr);
     params.state.setProperty ("ui", uiScale.load(), nullptr);
     auto st = params.copyState();
     if (auto xml = st.createXml()) copyXmlToBinary (*xml, dest);
 }
 
+// Estados de versións anteriores. Versión 0: sen número de versión (Barullo Tune 0.1).
+// Cando cambie un parámetro (nome, rango, opcións), súbese stateVersion e tradúcese aquí.
+void TuneProcessor::migrateState (juce::ValueTree& st, int fromVersion)
+{
+    (void) st;
+    if (fromVersion < 1)
+    {
+        // 0 → 1: só se engadiu o bypass; os parámetros que faltan póñense ao valor de fábrica (abaixo)
+    }
+}
+
 void TuneProcessor::setStateInformation (const void* data, int size)
 {
-    if (auto xml = getXmlFromBinary (data, size))
-        if (xml->hasTagName (params.state.getType()))
-        {
-            params.replaceState (juce::ValueTree::fromXml (*xml));
-            currentPreset = juce::jlimit (0, (int) presets().size() - 1, (int) params.state.getProperty ("preset", 0));
-            uiScale = juce::jlimit (0.75f, 1.5f, (float) (double) params.state.getProperty ("ui", 1.0));
-        }
+    auto xml = getXmlFromBinary (data, size);
+    if (xml == nullptr || ! xml->hasTagName (params.state.getType())) return;
+    auto st = juce::ValueTree::fromXml (*xml);
+    const int from = (int) st.getProperty ("version", 0);
+    migrateState (st, from);
+    // un estado vello non trae os parámetros novos: van co valor de fábrica, non co que tivese esta instancia
+    for (auto* prm : getParameters())
+        if (auto* wp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+            if (! st.getChildWithProperty ("id", wp->paramID).isValid())
+            {
+                juce::ValueTree child ("PARAM");
+                child.setProperty ("id", wp->paramID, nullptr);
+                child.setProperty ("value", wp->convertFrom0to1 (wp->getDefaultValue()), nullptr);
+                st.appendChild (child, nullptr);
+            }
+    params.replaceState (st);
+    // o preset búscase polo nome (se cambia a orde da lista, segue sendo o mesmo)
+    int pr = (int) st.getProperty ("preset", 0);
+    const auto name = st.getProperty ("presetName").toString();
+    for (int i = 0; i < (int) presets().size() && name.isNotEmpty(); ++i)
+        if (getProgramName (i) == name) pr = i;
+    currentPreset = juce::jlimit (0, (int) presets().size() - 1, pr);
+    uiScale = juce::jlimit (0.75f, 1.5f, (float) (double) st.getProperty ("ui", 1.0));
 }
 
 juce::AudioProcessorEditor* TuneProcessor::createEditor() { return new TuneEditor (*this); }

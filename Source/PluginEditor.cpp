@@ -402,7 +402,7 @@ void Keyboard::paint (juce::Graphics& g)
                 g.restoreState();
             }
             // fóra do rango da voz: máis escuro
-            if (n < mLo - 0.5f || n > mHi + 0.5f)
+            if ((float) n < mLo - 0.5f || (float) n > mHi + 0.5f)
             {
                 g.setColour (col::noite.withAlpha (0.5f));
                 g.fillRoundedRectangle (k, 3.0f);

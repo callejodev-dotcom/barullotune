@@ -74,6 +74,9 @@ public:
     void releaseResources() override {}
     bool isBusesLayoutSupported (const BusesLayout&) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    // bypass do DAW: a voz orixinal sae atrasada a mesma latencia (o DAW non a despraza) e cun fundido
+    void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    juce::AudioProcessorParameter* getBypassParameter() const override { return bypassParam; }
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -95,6 +98,10 @@ public:
 
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
+    // versión do formato do estado: súbese cada vez que cambian os parámetros, e
+    // migrateState() leva os estados vellos ao formato novo
+    static constexpr int stateVersion = 1;
+    static void migrateState (juce::ValueTree& state, int fromVersion);
 
     juce::AudioProcessorValueTreeState params;
 
@@ -134,11 +141,12 @@ private:
     void pushFrame();
     void handleAsyncUpdate() override;
     void applyEngineSettings();
+    void process (juce::AudioBuffer<float>&, juce::MidiBuffer&, bool hostBypass);
 
     tune::Engine engine;
     std::array<std::vector<float>, 2> dry;
     int dryPos = 0;
-    juce::SmoothedValue<float> mixSm, gainSm;
+    juce::SmoothedValue<float> mixSm, gainSm, bypassSm;
     int frameCount = 0;
     float levelAcc = 0, outAcc = 0;
     std::atomic<int> latencyNow { 0 };
@@ -152,7 +160,8 @@ private:
     std::array<std::atomic<float>, 12> keyHist {};
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
-    std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib;
+    std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass;
+    juce::AudioProcessorParameter* bypassParam = nullptr;
     std::array<std::atomic<float>*, 12> pNota {}, pLibre {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TuneProcessor)

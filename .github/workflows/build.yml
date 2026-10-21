@@ -32,11 +32,13 @@ jobs:
       - name: Compilar (universal)
         run: |
           set -o pipefail
-          ( cmake -B build -G Xcode -DJUCE_DIR="$RUNNER_TEMP/JUCE" -DBARULLO_TESTS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+          ( cmake -B build -G Xcode -DJUCE_DIR="$RUNNER_TEMP/JUCE" -DBARULLO_TESTS=ON -DBARULLO_WERROR=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
             && cmake --build build --config Release -j 4 ) 2>&1 | tee build.log \
             || { grep -E "error:|CMake Error" build.log | head -10 | while IFS= read -r l; do echo "::error::$l"; done; exit 1; }
       - name: Proba de son (afinación, bloques e estado)
-        run: ./build/BTRenderTest_artefacts/Release/BTRenderTest prueba.wav
+        run: ./build/BTRenderTest_artefacts/Release/BTRenderTest prueba.wav --json metricas.json
+      - name: Métricas (sen retrocesos respecto da base)
+        run: python3 tools/compara.py tools/metricas-base.json metricas.json
       - name: pluginval (VST3, nivel 10)
         run: |
           curl -sSL -o pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
@@ -88,7 +90,9 @@ jobs:
           ( cmake -B build -A x64 -DJUCE_DIR="$JUCE" -DBARULLO_TESTS=ON && cmake --build build --config Release -j 4 ) 2>&1 | tee build.log \
             || { grep -E "error|Error|CMake Error" build.log | grep -v "error.h\|-Werror\|onerror" | head -10 | while IFS= read -r l; do echo "::error::$l"; done; exit 1; }
       - name: Proba de son
-        run: ./build/BTRenderTest_artefacts/Release/BTRenderTest.exe prueba.wav
+        run: ./build/BTRenderTest_artefacts/Release/BTRenderTest.exe prueba.wav --json metricas.json
+      - name: Métricas (sen retrocesos respecto da base)
+        run: python tools/compara.py tools/metricas-base.json metricas.json
       - name: pluginval (VST3, nivel 10)
         run: |
           curl -sSL -o pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip
@@ -135,7 +139,19 @@ jobs:
           ( cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$RUNNER_TEMP/JUCE" -DBARULLO_TESTS=ON && cmake --build build ) 2>&1 | tee build.log \
             || { grep -E "error:|CMake Error" build.log | head -10 | while IFS= read -r l; do echo "::error::$l"; done; exit 1; }
       - name: Proba de son
-        run: ./build/BTRenderTest_artefacts/Release/BTRenderTest prueba.wav
+        run: ./build/BTRenderTest_artefacts/Release/BTRenderTest prueba.wav --json metricas.json
+      - name: Métricas (sen retrocesos respecto da base)
+        run: python3 tools/compara.py tools/metricas-base.json metricas.json
+      - name: Voces reais (sen retrocesos respecto da base)
+        run: |
+          mkdir -p "$RUNNER_TEMP/voces" && cd "$RUNNER_TEMP/voces"
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/spotify/basic-pitch && (cd basic-pitch && git sparse-checkout set tests/resources)
+          git clone -q --depth 1 --filter=blob:none --no-checkout https://github.com/nnsvs/nnsvs && (cd nnsvs && git checkout -q HEAD -- tests/data)
+          git clone -q --depth 1 --filter=blob:none --no-checkout https://github.com/MTG/essentia && (cd essentia && git checkout -q HEAD -- src/examples/python/musicbricks-tutorials)
+          cd "$GITHUB_WORKSPACE"
+          python3 -m pip install -q numpy scipy
+          python3 tools/banco.py build/BTRenderTest_artefacts/Release/BTRenderTest "$RUNNER_TEMP/voces" --json banco.json
+          python3 tools/compara.py tools/banco-base.json banco.json
       - name: pluginval (VST3, nivel 10, con interfaz)
         run: |
           curl -sSL -o pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
@@ -151,10 +167,29 @@ jobs:
           name: linux
           path: dist/*
 
+  sanitizadores:
+    name: Memoria e comportamento indefinido (ASan + UBSan)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxcomposite-dev libxext-dev libfreetype6-dev libfontconfig1-dev ninja-build
+      - name: JUCE
+        run: git clone --depth 1 --branch "$JUCE_TAG" https://github.com/juce-framework/JUCE.git "$RUNNER_TEMP/JUCE"
+      - name: Compilar a proba con sanitizadores
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DJUCE_DIR="$RUNNER_TEMP/JUCE" -DBARULLO_TESTS=ON -DBARULLO_SANITIZE=ON
+          cmake --build build --target BTRenderTest
+      - name: Proba de son con sanitizadores
+        run: ./build/BTRenderTest_artefacts/RelWithDebInfo/BTRenderTest
+
   publicar:
     name: Publicar versión
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [mac, windows, linux]
+    needs: [mac, windows, linux, sanitizadores]
     runs-on: ubuntu-latest
     permissions:
       contents: write

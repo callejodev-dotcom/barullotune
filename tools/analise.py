@@ -123,4 +123,5 @@ def main():
         ax.set_title(sys.argv[5] if len(sys.argv) > 5 else "")
         ax.legend(loc="upper right"); fig.tight_layout(); fig.savefig(sys.argv[4])
 
-main()
+if __name__ == "__main__":
+    main()

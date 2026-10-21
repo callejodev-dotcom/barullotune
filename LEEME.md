@@ -32,6 +32,8 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Comparar**: escoita a voz sen afinar, aliñada no tempo.
 - **Estéreo de verdade**: o ton detéctase no centro e as dúas canles corríxense igual (a imaxe estéreo non se move).
 - **Xanela** de 75 % a 150 % (arrastrando a esquina); o tamaño gárdase co proxecto.
+- **Bypass** de verdade: a voz orixinal sae atrasada a mesma latencia ca o efecto (o DAW non a despraza) e cun fundido de 20 ms, sen clic. O motor segue escoitando, así ao volver xa sabe por onde vai a voz.
+- **Proxectos vellos**: o estado leva número de versión; ao abrir un proxecto dunha versión anterior, os axustes tradúcense e os parámetros novos chegan co seu valor de fábrica.
 
 ## Como funciona
 
@@ -39,7 +41,9 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 |---|---|
 | `Source/tune/Engine.h` | O motor. Detector de ton tipo YIN (sinal diezmada a ~12 kHz, cada 4 ms), con continuidade e confirmación ao comezar. Marcas de ciclo aliñadas por correlación, con precisión de fracción de mostra. Lectura entre mostras con sinc de 16 puntos (agudos planos ata 16 kHz). **Directo** e **Preciso**: a voz lese a outra velocidade e salta un ciclo enteiro cando se adianta ou se atrasa (fundido de 0,6 ms; latencia 0,9 ms); o ton mídese cada poucas mostras nunha xanela deslizante de período e medio que acaba na última mostra (correlación normalizada arredor do período anterior, con parábola): as medidas solápanse, así non teñen o tremor dun ciclo solto, e o ton no punto que se le interpólase entre elas (en Directo, extrapólase un anaco coa pendente do último período; en Preciso, a lectura vai 11,5 ms detrás e sempre cae entre medidas). O ton mírase 1,5 ms por diante do punto de lectura, o mesmo que tarda o suavizado da corrección, para que a corrección chegue a tempo. Ao transpor ou mover os formantes, unha **corrección de formantes sen latencia** mide cada 5 ms a envolvente (predición lineal de orde ~37) da voz orixinal e da lida, e coa lida fai: branquear coa súa envolvente e colorear coa orixinal (celosías con coeficientes de reflexión interpolados, sempre estables). **Estudio**: TD-PSOLA en tempo real, cada grano corrixido co seu propio período, e formantes lendo o grano a outra velocidade. Modelo de corrección común: o vibrato sepárase cun filtro de banda (3–8 Hz) e só se respecta se é regular (medios ciclos de 60–140 ms parecidos entre si e máis de 8 cents): a oscilación irregular dunha voz insegura corríxese coma calquera desafinación; o centro vai á nota con «velocidade», a nota de destino móvese con «transición» e o vibrato volve sumarse. Nos portamentos (a voz movéndose máis de 4 semitonos/s) a corrección sóltase en proporción á transición, para non arrastrar a voz cara á nota anterior; e a nota nova acéptase xa se a voz vai claramente cara a ela. |
 | `Source/Plugin*.cpp` | O plugin JUCE e a interface |
-| `tools/RenderTest.cpp` | Proba sen interface; con `--file entrada.wav saida.wav parámetro=valor…` procesa un ficheiro |
+| `tools/RenderTest.cpp` | Proba sen interface; con `--file entrada.wav saida.wav parámetro=valor…` procesa un ficheiro; con `--json metricas.json` garda as métricas; imprime a **huella da saída** (para comprobar que un cambio de organización non cambia nin un bit) |
+| `tools/compara.py` | Compara as métricas coa base (`tools/metricas-base.json`, `tools/banco-base.json`) e falla se algo empeora; con `--gardar` actualiza a base |
+| `tools/banco.py` | Banco de voces reais: cada voz polos tres xeitos, con cents, saltos (a saída sepárase máis de 1,6 semitonos da entrada) e perdas |
 | `tools/analise.py` | Mide a afinación dunha voz antes e despois (YIN, vibrato, centro das notas, gráfico) |
 | `tools/voces/LEEME.md` | De onde saen as voces reais das probas |
 | `packaging/` | Instaladores para Mac, Windows e Linux |
@@ -58,6 +62,11 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Bloques** de 37 e de 512 mostras, mono e estéreo: mesmo resultado. **Mestura 0 %** = voz orixinal atrasada exactamente a latencia.
 - **Cambiar de xeito** en marcha: a latencia nova chega ao DAW. **Detectar tonalidade**: Do maior na melodía de proba.
 - **Estado** gardado e recuperado. Silencio e ruído sen valores raros.
+- **Bypass** (o parámetro e o do DAW) = voz orixinal atrasada exactamente a latencia, nos tres xeitos.
+- **Estado de 0.1** (sen versión): migra, o bypass vai ao valor de fábrica e o preset atópase polo nome. Estados rotos ou truncados non fan nada raro.
+- **Automatización ao chou**: 60 s con todos os parámetros movéndose, bloques de 1 a 1024 mostras, MIDI, cambios de xeito e de frecuencia de mostraxe (22–192 kHz), con voz, ruído, silencio, continua, cadrada a 0 dBFS, impulsos e voz saturada: sempre finito e sen disparar.
+- **Sanitizadores** (AddressSanitizer e UBSan) sobre toda a proba no CI; avisos como erros no código propio no Mac.
+- **Sen retrocesos**: o CI compara as métricas (sintéticas nos tres sistemas e voces reais en Linux) coa base e falla se algo empeora.
 - **pluginval** ao nivel máximo (10), con probas de interface; auval no Mac.
 
 ## Publicar unha versión

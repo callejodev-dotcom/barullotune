@@ -35,12 +35,15 @@ public:
     void configure (bool isPrecise) { precise = isPrecise; dLead = precise ? dMin + (int) std::lround (0.0115 * sr) : dMin; }
     int latency() const { return dLead; }
 
-    void reset()
+    void reset() { restart (0); }
+
+    // empeza a ler no punto n (a análise segue coma estaba)
+    void restart (int64_t n)
     {
         ffix.reset();
         envIn[0] = envIn[1] = envOut[0] = envOut[1] = 0;
         decider.reset(); decCount = 0;
-        rp = -(double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; state = {};
+        rp = (double) n - (double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; state = {};
     }
 
     void process (float* y)

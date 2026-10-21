@@ -141,12 +141,16 @@ private:
     void pushFrame();
     void handleAsyncUpdate() override;
     void applyEngineSettings();
+    bool engineSettingsPending() const;
     void process (juce::AudioBuffer<float>&, juce::MidiBuffer&, bool hostBypass);
 
     tune::Engine engine;
     std::array<std::vector<float>, 2> dry;
     int dryPos = 0;
     juce::SmoothedValue<float> mixSm, gainSm, bypassSm;
+    // cambio de xeito ou de voz en marcha: a saída baixa en 5 ms, cámbiase e volve subir
+    float switchGain = 1.0f, switchStep = 0.004f;
+    int switchState = 0;   // 0 nada, −1 baixando, +1 subindo
     int frameCount = 0;
     float levelAcc = 0, outAcc = 0;
     std::atomic<int> latencyNow { 0 };

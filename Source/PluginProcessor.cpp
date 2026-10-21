@@ -88,20 +88,28 @@ TuneProcessor::TuneProcessor()
     for (auto& h : keyHist) h = 0;
 
     engine.prepare (44100.0);
+    latencyNow = -1;
     applyEngineSettings();
     setLatencySamples (latencyNow.load());
 }
 
-// xeito e rango cambian a latencia: o motor volve empezar e avísase ao DAW
+// xeito e rango cambian a latencia: avísase ao DAW
 void TuneProcessor::applyEngineSettings()
 {
     const int q = juce::jlimit (0, 2, (int) pCal->load()), r = juce::jlimit (0, (int) tune::Engine::numRanges - 1, (int) pRango->load());
     if (q != engine.currentQuality() || r != engine.currentRange() || latencyNow.load() != engine.latency())
     {
-        engine.configure (q, r);
+        if (latencyNow.load() < 0) engine.configure (q, r);   // ao preparar: de cero
+        else engine.switchTo (q, r);                         // en marcha: a análise segue
         latencyNow = engine.latency();
         triggerAsyncUpdate();
     }
+}
+
+bool TuneProcessor::engineSettingsPending() const
+{
+    const int q = juce::jlimit (0, 2, (int) pCal->load()), r = juce::jlimit (0, (int) tune::Engine::numRanges - 1, (int) pRango->load());
+    return q != engine.currentQuality() || r != engine.currentRange();
 }
 
 void TuneProcessor::handleAsyncUpdate() { setLatencySamples (latencyNow.load()); }
@@ -146,6 +154,7 @@ void TuneProcessor::prepareToPlay (double sr, int)
     mixSm.reset (sr, 0.03); mixSm.setCurrentAndTargetValue (pComp->load() > 0.5f ? 0.0f : pMest->load() * 0.01f);
     gainSm.reset (sr, 0.03); gainSm.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVol->load()));
     bypassSm.reset (sr, 0.02); bypassSm.setCurrentAndTargetValue (pBypass->load() > 0.5f ? 1.0f : 0.0f);
+    switchGain = 1.0f; switchState = 0; switchStep = (float) (1.0 / (0.005 * sr));
     frameCount = 0; levelAcc = 0;
     fifo.reset();
 }
@@ -268,7 +277,8 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     const int numCh = buffer.getNumChannels(), numIn = juce::jmin (numCh, getTotalNumInputChannels());
     const int n = buffer.getNumSamples();
 
-    applyEngineSettings();
+    // cambio de xeito ou de voz: primeiro baixa a saída (abaixo, mostra a mostra)
+    if (switchState == 0 && engineSettingsPending()) switchState = -1;
     engine.mode = juce::jlimit (0, 2, (int) pModo->load());
     engine.formant = pForm->load();
     engine.key = 0;
@@ -288,7 +298,8 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
 
     auto it = midi.cbegin();
     const auto end = midi.cend();
-    const int dsz = (int) dry[0].size(), lat = juce::jmin (dsz - 1, engine.latency());
+    const int dsz = (int) dry[0].size();
+    int lat = juce::jmin (dsz - 1, engine.latency());
 
     for (int i = 0; i < n; ++i)
     {
@@ -317,11 +328,19 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             const float dx = dry[(size_t) c][(size_t) rd];
             float y = (dx + (wet[c] - dx) * mix) * g;
             if (byp > 0.0f) y = byp >= 1.0f ? dx : y + (dx - y) * byp;
+            y *= switchGain;
             buffer.getWritePointer (c)[i] = y;
             peakIn = juce::jmax (peakIn, std::abs (x[c])); peakOut = juce::jmax (peakOut, std::abs (y));
         }
         if (ech == 1) for (int c = 1; c < numCh; ++c) buffer.getWritePointer (c)[i] = buffer.getReadPointer (0)[i];
         if (++dryPos >= dsz) dryPos = 0;
+        if (switchState < 0 && (switchGain -= switchStep) <= 0.0f)
+        {
+            switchGain = 0.0f; switchState = 1;
+            applyEngineSettings();
+            lat = juce::jmin (dsz - 1, engine.latency());
+        }
+        else if (switchState > 0 && (switchGain += switchStep) >= 1.0f) { switchGain = 1.0f; switchState = 0; }
 
         levelAcc = juce::jmax (levelAcc * 0.9995f, peakIn);
         outAcc = juce::jmax (outAcc * 0.9995f, peakOut);

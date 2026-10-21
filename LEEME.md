@@ -84,7 +84,8 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Transparencia**: coa corrección a 0 % a voz sae igual (mesmo nivel e periodicidade). Resposta en agudos: plana ata 16 kHz (antes, coa interpolación lineal, −2,9 dB a 12–16 kHz).
 - **Estéreo**: L e R corríxense igual (R = 0,6·L atrasada 3 ms segue sendo 0,6·L). **Comparar** = voz orixinal aliñada. **Presets** aplícanse e gárdanse.
 - **Bloques** de 37 e de 512 mostras, mono e estéreo: mesmo resultado. **Mestura 0 %** = voz orixinal atrasada exactamente a latencia.
-- **Cambiar de xeito** en marcha: a latencia nova chega ao DAW. **Detectar tonalidade**: Do maior na melodía de proba.
+- **Cambiar de xeito** en marcha: a latencia nova chega ao DAW, a saída baixa e sobe en 5 ms (sen estalo: o salto máis grande entre mostras é como o da voz, antes 3,6 veces máis) e, como a análise segue, o son volve en 14 ms (antes 33 ms en Estudio).
+- **Comprobado e sen cambios**: a corrección de formantes a 96 e 192 kHz afina o timbre igual ca a 48 kHz (distancia 1,9–2,0 dB ao transpor +5), e a ±7 e ±12 Estudio e Directo conservan o timbre de xeito parecido (0,7–3,2 dB). **Detectar tonalidade**: Do maior na melodía de proba.
 - **Estado** gardado e recuperado. Silencio e ruído sen valores raros.
 - **Bypass** (o parámetro e o do DAW) = voz orixinal atrasada exactamente a latencia, nos tres xeitos.
 - **Estado de 0.1** (sen versión): migra, o bypass vai ao valor de fábrica e o preset atópase polo nome. Estados rotos ou truncados non fan nada raro.

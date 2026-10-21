@@ -23,11 +23,14 @@ public:
 
     static int latencyFor (int pMax) { return (int) std::ceil (2.5 * pMax) + 32; }
 
-    void reset (int latencySamples)
+    void reset (int latencySamples) { restart (0, latencySamples); }
+
+    // empeza a sintetizar no punto n (a análise segue coma estaba)
+    void restart (int64_t n, int latencySamples)
     {
         for (int c = 0; c < 2; ++c) std::fill (outCh[c].begin(), outCh[c].end(), 0.0);
         latency = latencySamples;
-        nextSyn = (double) an.pMax; srcOff = -(double) latency; synVoiced = false; state = {};
+        nextSyn = (double) (n + an.pMax); srcOff = -(double) latency; synVoiced = false; state = {};
         decider.reset(); lastDecPos = -1e18;
     }
 

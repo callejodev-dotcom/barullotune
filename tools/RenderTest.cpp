@@ -793,6 +793,44 @@ int main (int argc, char** argv)
         check ("cambio de xeito en marcha", finite && p.getLatencySamples() < 48);
     }
 
+    // cambio de xeito sen estalo: a saída baixa en 5 ms, cámbiase e volve subir; a análise
+    // segue, así a voz volve enseguida (antes o motor empezaba de cero e, en Estudio, o
+    // son volvía de golpe aos 36 ms)
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (1, 1, SR, 256);
+        p.prepareToPlay (SR, 256);
+        juce::AudioBuffer<float> buf (1, 256);
+        std::vector<float> out;
+        const int sw[] = { 100, 200, 300, 400 };
+        for (int blk = 0; blk < 500; ++blk)
+        {
+            if (blk == sw[0]) setP (p, "calidade", 2);
+            if (blk == sw[1]) setP (p, "calidade", 1);
+            if (blk == sw[2]) setP (p, "rango", 2);
+            if (blk == sw[3]) setP (p, "calidade", 0);
+            for (int i = 0; i < 256; ++i) buf.setSample (0, i, voice[(size_t) (blk * 256 + i)]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            for (int i = 0; i < 256; ++i) out.push_back (buf.getSample (0, i));
+        }
+        // o salto máis grande dunha mostra á seguinte, preto dos cambios e no resto
+        auto maxStep = [&] (size_t a, size_t b) { float mx = 0; for (size_t i = std::max<size_t> (a, 1); i < b && i < out.size(); ++i) mx = std::max (mx, std::abs (out[i] - out[i - 1])); return mx; };
+        float nearSw = 0;
+        for (int b : sw) nearSw = std::max (nearSw, maxStep ((size_t) b * 256, (size_t) b * 256 + (size_t) (0.06 * SR)));
+        const float steady = maxStep ((size_t) (0.5 * SR), (size_t) sw[0] * 256);
+        // e canto tarda en volver o son tras pasar a Estudio (nivel en 10 ms)
+        int back = -1;
+        for (size_t w = (size_t) sw[0] * 256; w + 480 < (size_t) sw[1] * 256 && back < 0; w += 48)
+        {
+            double e = 0; for (size_t i = w; i < w + 480; ++i) e += (double) out[i] * out[i];
+            if (std::sqrt (e / 480.0) > 0.02) back = (int) (w - (size_t) sw[0] * 256);
+        }
+        std::printf ("cambio de xeito: salto máximo %.3f preto dos cambios (no resto %.3f); o son volve en %.1f ms\n", nearSw, steady, back / 48.0);
+        metric ("cambio.salto", nearSw / std::max (1e-6f, steady));
+        // antes: salto 3,6 veces o normal e o son volvía aos 33 ms
+        check ("cambio de xeito sen estalo e o son volve axiña", nearSw <= steady * 1.5f && back >= 0 && back < (int) (0.025 * SR));
+    }
+
     // detectar a tonalidade: a melodía (Do maior) dúas veces
     {
         TuneProcessor p;

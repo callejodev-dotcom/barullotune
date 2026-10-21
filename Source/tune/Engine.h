@@ -39,17 +39,13 @@ public:
         configure (quality, range);
     }
 
-    // cambia o xeito e o rango (cambia a latencia; volve empezar)
-    void configure (int q, int r)
-    {
-        quality = std::max (0, std::min (2, q));
-        range = std::max (0, std::min ((int) numRanges - 1, r));
-        an.setRange (range);
-        direct.configure (quality == Precise);
-        latencySamples = quality == Studio ? StudioVoice::latencyFor (an.pMax) : direct.latency();
-        an.latencySamples = latencySamples;
-        reset();
-    }
+    // cambia o xeito e o rango (cambia a latencia) e volve empezar de cero
+    void configure (int q, int r) { setMode (q, r, true); }
+
+    // o mesmo, en marcha: a análise segue (a historia da voz, as marcas de ciclo) e só
+    // as voces de saída empezan de novo no punto de agora; así non hai que agardar a que
+    // volva entrar a voz (antes, en Estudio, o son volvía de golpe aos 36 ms)
+    void switchTo (int q, int r) { setMode (q, r, false); }
 
     int latency() const { return latencySamples; }
     int currentQuality() const { return quality; }
@@ -89,6 +85,19 @@ public:
     int targetNote() const { return an.target; }
 
 private:
+    void setMode (int q, int r, bool full)
+    {
+        const int oldRange = range;
+        quality = std::max (0, std::min (2, q));
+        range = std::max (0, std::min ((int) numRanges - 1, r));
+        if (full || range != oldRange) an.setRange (range);
+        direct.configure (quality == Precise);
+        latencySamples = quality == Studio ? StudioVoice::latencyFor (an.pMax) : direct.latency();
+        an.latencySamples = latencySamples;
+        if (full) reset();
+        else { direct.restart (an.n); studio.restart (an.n, latencySamples); }
+    }
+
     Analysis an;
     DirectVoice direct;
     StudioVoice studio;

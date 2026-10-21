@@ -1,8 +1,9 @@
 {
-  "cpu.directo": 1.9265,
-  "cpu.directo_formantes": 4.0171,
-  "cpu.estudio": 1.3365,
-  "cpu.preciso": 2.0821,
+  "cambio.salto": 1.1121,
+  "cpu.directo": 1.9148,
+  "cpu.directo_formantes": 4.0079,
+  "cpu.estudio": 1.3378,
+  "cpu.preciso": 2.0986,
   "directo.baixa40db.cents": 0.3473,
   "directo.bend.cents": 1.2514,
   "directo.estereo.cents": 0.4567,

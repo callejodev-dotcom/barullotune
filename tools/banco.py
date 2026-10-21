@@ -6,7 +6,8 @@ e mide a afinación da saída.
 
 As voces descárganse como di tools/voces/LEEME.md (calquera subcarpeta vale: búscanse polo nome).
 Métricas por voz e xeito:
-  cents   distancia media da saída ao semitono máis próximo (tramas con voz nas dúas)
+  cents   distancia media da saída ao semitono máis próximo, onde a saída está quieta
+          (nos cambios de nota a xanela de análise colle dúas notas e non mide afinación)
   saltos  % de tramas nas que a saída se separa da entrada máis de 1,6 semitonos
           (un salto de oitava ou de nota que a corrección non debería facer)
   perdas  % de tramas con voz na entrada e sen ton claro na saída
@@ -32,9 +33,17 @@ def measure(src, out):
     n = min(len(fi), len(fo)); fi, fo = fi[:n], fo[:n]
     mi, mo = analise.midi(fi), analise.midi(fo)
     vi = ~np.isnan(mi); ok = vi & ~np.isnan(mo)
-    d = np.abs(mo[ok] - np.round(mo[ok])) * 100
+    # tramas onde a saída está quieta (±30 ms dentro de 0,25 semitonos): alí mídese a
+    # afinación; nos cambios de nota a xanela de análise (28 ms) colle dúas notas
+    k = 3
+    stable = np.zeros(n, bool)
+    for i in range(k, n - k):
+        w = mo[i - k:i + k + 1]
+        stable[i] = not np.isnan(w).any() and (w.max() - w.min()) < 0.25
     jumps = np.abs(mo[ok] - mi[ok]) > 1.6
-    return {"cents": float(d[~jumps].mean()) if (~jumps).any() else 0.0,
+    st = stable & ok & ~(np.abs(mo - mi) > 1.6)
+    d = np.abs(mo[st] - np.round(mo[st])) * 100
+    return {"cents": float(d.mean()) if st.any() else 0.0,
             "entrada": float((np.abs(mi[ok] - np.round(mi[ok])) * 100).mean()),
             "saltos": float(100 * jumps.mean()) if ok.any() else 0.0,
             "perdas": float(100 * np.mean(np.isnan(mo[vi]))) if vi.any() else 0.0}

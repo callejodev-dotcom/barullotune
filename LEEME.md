@@ -52,7 +52,15 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 
 - **Voz sintética desafinada** (32 cents de media, con vibrato, glisandos e consoantes), efecto robot: 0,8 cents en Directo e 0,2 en Estudio. Transpor +5, MIDI e formantes caen na nota; vibrato ao 100 %: notas centradas (±0,3 c) e vibrato intacto; tolerancia e notas libres deixan a voz.
 - **Vibrato**: nota longa 25 c baixa con vibrato regular de ±30 c: con vibrato 100 % sae centrada (±0,3 c) e co vibrato enteiro (±28 c); con 0 %, plana. Unha oscilación irregular de 25 c redúcese a ~11 c co preset Natural.
-- **Voces reais** (vocadito, NIT, Essentia, flamenco), efecto robot, distancia media á nota (entrada 11–26 c): Directo 1,2–6,3 c, Preciso 0,9–3,0 c, Estudio 0,8–3,0 c. Coa medida deslizante, Directo erra a metade ca antes (2–12 c) e Preciso afina coma Estudio con menos latencia.
+- **Voces reais** (vocadito, NIT, Essentia, flamenco; `tools/banco.py`), efecto robot e escala cromática, media das sete voces (entrada 11–26 c):
+
+  | | Directo | Preciso | Estudio |
+  |---|---|---|---|
+  | afinación nas notas (cents) | 1,2 | 0,7 | 0,5 |
+  | saltos (a saída a máis de 1,6 semitonos da voz) | 1,3 % (antes 6,2 %) | 1,1 % (antes 4,3 %) | 1,9 % (antes 7,8 %) |
+
+  Os saltos eran a nota de destino quedando atrás nos glisandos rápidos. Agora cada voz de saída decide a súa nota co ton do punto que está lendo (Estudio, coa media dos ciclos a ±10 ms do grano, que xa ten medidos) e, nun glisando de máis dun semitono que non sexa vibrato, o suavizado da decisión volve empezar no ton de agora.
+- **Glisandos** sintéticos (ata 40 st/s), robot: tramas con a saída a máis de 1,1 semitonos da voz: 2,6–2,9 % (antes 16–23 %).
 - **Vibrato rápido con tremor** (6,2 Hz, ±45 c, tremor de período de 0,6 % ciclo a ciclo), robot: a nota queda plana a 2,4 c en Directo (antes 6,0 c), 0,6 c en Preciso e 0,1 c en Estudio.
 - **Condicións reais**: voz moi baixa (picos a −45 dBFS), ruído rosa a 20 dB de SNR, reverberación e 96 kHz: afina igual ca coa voz limpa (con ruído a 10 dB, algo menos).
 - **Timbre ao transpor +5** (espectro medio en terzos de oitava, distancia ao orixinal): voz acelerada sen corrixir («esquío») 3,2 dB, Directo 1,7 dB, Estudio 1,4 dB. Nunha voz real: 12,9 dB sen corrixir, 3,5 dB en Directo, 3,2 dB en Estudio.

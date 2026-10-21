@@ -13,12 +13,14 @@ namespace tune {
 class DirectVoice
 {
 public:
-    DirectVoice (const Settings& s, Analysis& a) : set (s), an (a), corr (s) {}
+    DirectVoice (const Settings& s, Analysis& a) : set (s), an (a), corr (s), decider (s, a.midi) {}
 
     void prepare (double sampleRate)
     {
         sr = sampleRate;
         corr.prepare (sr);
+        decider.prepare (sr);
+        decHop = std::max (1, (int) std::lround (0.004 * sr));
         xfade = std::max (16, (int) std::lround (sr * 0.0006));
         dMin = (int) std::ceil (1.1 * xfade) + 4 + Sinc::half;   // o interpolador mira 8 mostras adiante
         ffix.prepare (sr);
@@ -28,12 +30,13 @@ public:
     }
 
     // preciso: a lectura vai 11,5 ms detrás, dentro de ciclos xa medidos (sen extrapolar)
-    void configure (bool precise) { dLead = precise ? dMin + (int) std::lround (0.0115 * sr) : dMin; }
+    void configure (bool isPrecise) { precise = isPrecise; dLead = precise ? dMin + (int) std::lround (0.0115 * sr) : dMin; }
     int latency() const { return dLead; }
 
     void reset()
     {
         ffix.reset();
+        decider.reset(); decCount = 0;
         rp = -(double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; state = {};
     }
 
@@ -41,7 +44,6 @@ public:
     {
         const int nch = an.nch;
         const bool voiced = an.voiced;
-        const int target = an.target;
         const double transpose = set.transpose;
         // corrección mostra a mostra (co ton detectado agora mesmo)
         double raw = transpose;
@@ -56,6 +58,18 @@ public:
             else if (an.cycleOk)
                 mNow = an.cycleM + an.cycleSlope * clampd (rp - an.cycleT, 0.0, 4.0 * an.curP);   // aínda non: extrapólase
         }
+        // a nota de destino decídese co ton do punto que se le (sen o atraso do detector);
+        // en Preciso, co de 6 ms máis adiante (xa se coñece): así cambia xusto onde cambia a voz
+        int target = an.target;
+        if (voiced && target >= 0)
+        {
+            double mDec = mNow;
+            if (precise) { double mi = 0; if (an.pitchAtSliding (rp + 0.5 * ((double) an.n - rp), mi)) mDec = mi; }
+            if (! decider.active) { decider.update (mDec, 0.0); decCount = 0; }
+            else if (++decCount >= decHop) { decider.update (mDec, (double) decCount); decCount = 0; }
+            target = decider.target;
+        }
+        else if (decider.active) decider.reset();
         const bool starting = voiced && target >= 0 && ! state.active;
         if (voiced && target >= 0) { double om; raw = corr.step (state, mNow, target, 1.0, an.isFree (target), an.bendNow(), om); }
         else state.active = false;
@@ -165,6 +179,9 @@ private:
     Analysis& an;
     Corrector corr;
     CorrState state;
+    NoteDecider decider;
+    int decHop = 192, decCount = 0;
+    bool precise = false;
     FormantFix ffix;
     double sr = 48000;
     double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, lookAhead = 0, ffixAlpha = 0.001;

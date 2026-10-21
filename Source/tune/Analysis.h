@@ -4,7 +4,7 @@
 //
 // Sen reservas de memoria no fío de audio: todo se reserva en prepare().
 #pragma once
-#include "Correction.h"
+#include "NoteDecider.h"
 #include "PitchDetector.h"
 
 namespace tune {
@@ -12,7 +12,7 @@ namespace tune {
 class Analysis
 {
 public:
-    explicit Analysis (const Settings& s) : set (s) {}
+    explicit Analysis (const Settings& s) : set (s), decider (s, midi) {}
 
     // tipos de voz: rango do detector (e latencia en estudio)
     enum Range { Bass = 0, Baritone, Tenor, Alto, Mezzo, Soprano, General, numRanges };
@@ -29,8 +29,8 @@ public:
     void prepare (double sampleRate)
     {
         sr = sampleRate;
+        decider.prepare (sr);
         detector.prepare (sr);
-        decisionAlpha = 1.0 - std::exp (-detector.hopSeconds() / 0.04);
         pMaxAlloc = (int) std::ceil (sr / PitchDetector::allocMinHz) + 2;
         ringSize = 1; while (ringSize < 10 * pMaxAlloc + 256) ringSize <<= 1;
         in.assign ((size_t) ringSize, 0.0f);
@@ -57,20 +57,12 @@ public:
         nMarks = 0; firstMark = 0; lastMark = 0; lastMarkVoiced = false;
         cycleOk = false;
         slN = 0; slFirst = 0; slTau = 0; slCount = 0; slSlope = 0;
-        target = -1; mSmooth = 0;
+        target = -1; decider.reset();
         voiced = false; detectedHz = 0; correctionCents = 0; inputMidi = 0; outputMidi = 0;
     }
 
     // ---- MIDI ----
-    void noteOn (int note) { if (note >= 0 && note < 128) { held[note] = 1; lastNote = note; recomputeHeld(); } }
-    void noteOff (int note)
-    {
-        if (note < 0 || note >= 128) return;
-        held[note] = 0; recomputeHeld();
-        if (note == lastNote) { lastNote = -1; for (int i = 127; i >= 0; --i) if (held[i]) { lastNote = i; break; } }
-    }
-    void allNotesOff() { for (auto& h : held) h = 0; heldMask = 0; lastNote = -1; }
-    void setPitchBend (int value14) { bend = (value14 - 8192) / 8192.0; }
+    MidiState midi;
 
     // unha mostra de 1 ou 2 canles: o ton detéctase no centro (L+R)/2
     void push (const float* x, int numChannels)
@@ -87,23 +79,10 @@ public:
 
     float read (const std::vector<float>& buf, double p) const { return sinc.read (buf, ringSize, p); }
 
-    bool allowed (int note) const
-    {
-        const int pc = ((note % 12) + 12) % 12;
-        if ((set.mode == Settings::MidiScale || set.mode == Settings::MidiNote) && heldMask != 0) return (heldMask >> pc) & 1;
-        const int deg = ((pc - set.key) % 12 + 12) % 12;
-        return ((set.scale | set.freeMask) >> deg) & 1;
-    }
-
-    bool isFree (int note) const
-    {
-        if ((set.mode == Settings::MidiScale || set.mode == Settings::MidiNote) && heldMask != 0) return false;
-        const int deg = (((note % 12) + 12) % 12 - set.key + 12) % 12;
-        return (set.freeMask >> deg) & 1;
-    }
+    bool isFree (int note) const { return noteFree (set, midi, note); }
 
     // pitch bend: só no modo MIDI nota e mentres hai unha nota tocada
-    double bendNow() const { return (set.mode == Settings::MidiNote && lastNote >= 0) ? bend * set.bendRange : 0.0; }
+    double bendNow() const { return (set.mode == Settings::MidiNote && midi.lastNote >= 0) ? midi.bend * set.bendRange : 0.0; }
 
     // ============================================================ marcas de ciclo
     struct Mark { double pos; double period; bool voiced; int target; };
@@ -263,64 +242,18 @@ public:
     double cycleM = 0, cycleT = 0, cycleSlope = 0;
     bool cycleOk = false;
 
-    uint16_t heldMask = 0;
-    int lastNote = -1;
-
 private:
-    void recomputeHeld()
-    {
-        heldMask = 0;
-        for (int i = 0; i < 128; ++i) if (held[i]) heldMask |= (uint16_t) (1u << (i % 12));
-    }
 
     void updatePitch()
     {
         const bool was = voiced;
         voiced = detector.voiced;
-        if (! voiced) return;
+        if (! voiced) { decider.reset(); return; }
         curP = detector.period;
         detectedHz = sr / curP;
         const double m = 69.0 + 12.0 * std::log2 (detectedHz / set.refA);
-        // a nota de destino decídese co ton suavizado (sen vibrato), para que un vibrato
-        // ancho ou unha voz a medio camiño entre dúas notas non faga saltar o destino
-        // ton para decidir a nota: suavizado 40 ms
-        const double dtd = detector.hopSeconds() * sr;
-        const double prevMd = mSmooth;
-        if (! was) { mSmooth = m; candidate = -1; candHeld = 0; decSlope = 0; }
-        else mSmooth += (m - mSmooth) * decisionAlpha;
-        const double md = mSmooth;
-        if (was) decSlope += ((md - prevMd) / detector.hopSeconds() - decSlope) * 0.3;   // semitonos/s
-
-        int t = target;
-        if (set.mode == Settings::MidiNote && lastNote >= 0)
-        {
-            // nota exacta: a oitava máis próxima á voz
-            t = lastNote;
-            while (t - md > 6.0) t -= 12;
-            while (md - t > 6.0) t += 12;
-        }
-        else
-        {
-            // nota permitida máis próxima, con histérese: unha nota nova acéptase se dura
-            // 25 ms ou se o salto é claro (case un semitono); así as voces que oscilan entre
-            // dúas notas non fan bailar o destino
-            int best = -1; double bd = 1e9;
-            const int c = (int) std::lround (md);
-            for (int k = c - 7; k <= c + 7; ++k)
-                if (allowed (k) && std::abs (md - k) < bd) { bd = std::abs (md - k); best = k; }
-            if (best < 0) best = c;
-            const bool keep = was && t >= 0 && allowed (t) && std::abs (md - t) < 0.6;
-            if (! keep && best != t)
-            {
-                if (best != candidate) { candidate = best; candHeld = 0; }
-                candHeld += dtd;
-                // se a voz vai claramente cara á nota nova (máis de 5 semitonos/s), acéptase xa
-                const bool movingThere = std::abs (decSlope) > 5.0 && (best - t) * decSlope > 0 && std::abs (md - t) > 0.5;
-                if (! was || t < 0 || ! allowed (t) || std::abs (md - t) > 0.9 || movingThere || candHeld >= 0.025 * sr) t = best;
-            }
-            else candidate = -1;
-        }
-        target = t;
+        if (! was) decider.reset();
+        target = decider.update (m, detector.hopSeconds() * sr);
         inputMidi = m;
     }
 
@@ -457,10 +390,7 @@ private:
     double lastMark = 0; bool lastMarkVoiced = false;
     double score[maxSearch] {};
 
-    double mSmooth = 0, decisionAlpha = 0.1, candHeld = 0, decSlope = 0;
-    int candidate = -1;
-    double bend = 0.0;
-    uint8_t held[128] {};
+    NoteDecider decider;
 };
 
 } // namespace tune

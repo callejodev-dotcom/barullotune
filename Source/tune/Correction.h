@@ -94,7 +94,6 @@ public:
         return outMidi - m;
     }
 
-private:
     // banda do vibrato: pasa banda de 5,5 Hz, Q 1,2 (ganancia 1 no centro); dt en mostras
     double vibratoBand (CorrState& st, double m, double dt) const
     {
@@ -131,6 +130,7 @@ private:
         if ((st.clock - st.lastZc) / sr > 0.16) st.vibConf *= std::exp (-dt / (0.1 * sr));
     }
 
+private:
     const Settings& set;
     double sr = 48000;
 };

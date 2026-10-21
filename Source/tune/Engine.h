@@ -29,7 +29,7 @@ public:
     Engine (const Engine&) = delete;
     Engine& operator= (const Engine&) = delete;
 
-    void setPitchBend (int value14) { an.setPitchBend (value14); }
+    void setPitchBend (int value14) { an.midi.setPitchBend (value14); }
 
     void prepare (double sampleRate)
     {
@@ -62,9 +62,9 @@ public:
         direct.reset();
     }
 
-    void noteOn (int note) { an.noteOn (note); }
-    void noteOff (int note) { an.noteOff (note); }
-    void allNotesOff() { an.allNotesOff(); }
+    void noteOn (int note) { an.midi.noteOn (note); }
+    void noteOff (int note) { an.midi.noteOff (note); }
+    void allNotesOff() { an.midi.allNotesOff(); }
 
     float process (float x) { float y = 0; processFrame (&x, &y, 1); return y; }
 
@@ -85,7 +85,7 @@ public:
     double inputMidi() const { return an.inputMidi; }
     double outputMidi() const { return an.outputMidi; }
     double clarity() const { return an.detector.clarity; }
-    uint16_t heldPitchClasses() const { return an.heldMask; }
+    uint16_t heldPitchClasses() const { return an.midi.heldMask; }
     int targetNote() const { return an.target; }
 
 private:

@@ -11,12 +11,13 @@ namespace tune {
 class StudioVoice
 {
 public:
-    StudioVoice (const Settings& s, Analysis& a) : set (s), an (a), corr (s) {}
+    StudioVoice (const Settings& s, Analysis& a) : set (s), an (a), corr (s), decider (s, a.midi) {}
 
     void prepare (double sampleRate)
     {
         sr = sampleRate;
         corr.prepare (sr);
+        decider.prepare (sr);
         for (int c = 0; c < 2; ++c) outCh[c].assign ((size_t) an.ringSize, 0.0);
     }
 
@@ -27,6 +28,7 @@ public:
         for (int c = 0; c < 2; ++c) std::fill (outCh[c].begin(), outCh[c].end(), 0.0);
         latency = latencySamples;
         nextSyn = (double) an.pMax; srcOff = -(double) latency; synVoiced = false; state = {};
+        decider.reset(); lastDecPos = -1e18;
     }
 
     void process (float* y)
@@ -42,6 +44,26 @@ public:
     }
 
 private:
+    // A nota de destino de cada grano decídese co ton arredor del (os ciclos a ±10 ms):
+    // Estudio le a voz 15–42 ms atrasada, así xa os ten medidos e a nota cambia onde
+    // cambia a voz, sen o atraso do detector. En MIDI nota manda a tecla (a da marca).
+    int decideTarget (int k, const Analysis::Mark& mk)
+    {
+        if (! mk.voiced || mk.target < 0) { decider.reset(); return mk.target; }
+        if (set.mode == Settings::MidiNote && an.midi.lastNote >= 0) return mk.target;
+        if (decider.active && mk.pos <= lastDecPos) return decider.target;   // o mesmo grano outra vez
+        const double win = 0.01 * sr;
+        double acc = 0; int cnt = 0;
+        for (int j = k; j >= 0 && an.markAt (j).voiced && mk.pos - an.markAt (j).pos <= win; --j) { acc += midiOf (an.localPeriod (j)); ++cnt; }
+        for (int j = k + 1; j + 1 < an.nMarks && an.markAt (j).voiced && an.markAt (j).pos - mk.pos <= win; ++j) { acc += midiOf (an.localPeriod (j)); ++cnt; }
+        const double mDec = acc / std::max (1, cnt);
+        const double dt = decider.active ? mk.pos - lastDecPos : 0.0;
+        lastDecPos = mk.pos;
+        return decider.update (mDec, dt);
+    }
+
+    double midiOf (double period) const { return 69.0 + 12.0 * std::log2 (sr / period / set.refA); }
+
     void synthesize()
     {
         const int64_t n = an.n;
@@ -76,16 +98,17 @@ private:
             if (ns > (double) n + 1.0) nextSyn = ns;
         }
         const Analysis::Mark mk = an.markAt (bestK);
+        const int target = decideTarget (bestK, mk);
 
         double P = mk.period, spacing = P, rf = 1.0;
-        if (mk.voiced && mk.target >= 0)
+        if (mk.voiced && target >= 0)
         {
             // cada grano co seu propio ton: a corrección calcúlase co período deste grano,
             // así a saída cae xusto na nota aínda que a voz se estea movendo
             P = an.localPeriod (bestK);
             const double m = 69.0 + 12.0 * std::log2 (sr / P / set.refA);
             double om = m;
-            const double cc = corr.step (state, m, mk.target, P, an.isFree (mk.target), an.bendNow(), om);
+            const double cc = corr.step (state, m, target, P, an.isFree (target), an.bendNow(), om);
             synVoiced = true;
             spacing = P / std::pow (2.0, cc / 12.0);
             an.correctionCents = (cc - set.transpose) * 100.0;
@@ -131,6 +154,8 @@ private:
     Analysis& an;
     Corrector corr;
     CorrState state;
+    NoteDecider decider;
+    double lastDecPos = -1e18;
     std::vector<double> outCh[2];
     double sr = 48000;
     int latency = 64;

@@ -81,9 +81,19 @@ private:
             run += s;
             d[(size_t) t] = run > 0 ? s * t / run : 1.0;
         }
+        // o primeiro val por baixo do limiar (YIN clásico)
+        int global = -1;
+        for (int t = tauMin; t < tauMax; ++t)
+            if (d[(size_t) t] < threshold)
+            {
+                while (t + 1 < tauMax && d[(size_t) t + 1] < d[(size_t) t]) ++t;
+                global = t; break;
+            }
         int best = -1;
         // continuidade: se xa había voz, mira primeiro arredor do período anterior (±15 %)
-        // para non saltar de oitava no medio dunha nota
+        // para non saltar de oitava no medio dunha nota. Pero se a voz cambiou de nota
+        // (o val de agora está lonxe e é claramente máis fondo), o de arredor é un val
+        // falso: antes quedaba enganchado nel uns 50 ms e a nota saía unha quinta abaixo
         if (voiced)
         {
             const double pt = period / decim;
@@ -91,15 +101,10 @@ private:
             int bl = -1;
             for (int t = lo; t <= hi; ++t)
                 if (t > 1 && d[(size_t) t] <= d[(size_t) t - 1] && d[(size_t) t] <= d[(size_t) t + 1] && (bl < 0 || d[(size_t) t] < d[(size_t) bl])) bl = t;
-            if (bl >= 0 && d[(size_t) bl] < threshold + 0.12) best = bl;
+            const bool globalClearlyBetter = global >= 0 && (global < lo || global > hi) && d[(size_t) global] < d[(size_t) std::max (bl, 0)] - 0.1;
+            if (bl >= 0 && d[(size_t) bl] < threshold + 0.12 && ! globalClearlyBetter) best = bl;
         }
-        if (best < 0)
-            for (int t = tauMin; t < tauMax; ++t)
-                if (d[(size_t) t] < threshold)
-                {
-                    while (t + 1 < tauMax && d[(size_t) t + 1] < d[(size_t) t]) ++t;
-                    best = t; break;
-                }
+        if (best < 0) best = global;
         if (best < 0)
         {
             best = tauMin;

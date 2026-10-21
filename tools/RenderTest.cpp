@@ -463,6 +463,44 @@ int main (int argc, char** argv)
             check (q == 0 ? "directo: vibrato rápido aplanado (menos de 4 c)" : q == 1 ? "preciso: vibrato rápido aplanado (menos de 1,5 c)" : "estudio: vibrato rápido aplanado (menos de 1,5 c)", rout < lim);
         }
 
+        // glisandos (efecto robot, cromática): a saída ten que ir en escaleira detrás da voz,
+        // cambiando de nota onde a voz cruza a metade. Antes a nota quedaba ata dous
+        // semitonos atrás nos glisandos rápidos (40 st/s)
+        {
+            struct Seg { double from, to, dur; };
+            const Seg segs[] = { { 57, 57, 0.4 }, { 57, 64, 0.18 }, { 64, 64, 0.35 }, { 64, 59, 0.12 }, { 59, 59, 0.35 },
+                                 { 59, 66, 0.5 }, { 66, 66, 0.3 }, { 66, 61, 0.25 }, { 61, 61, 0.4 }, { 61, 63.2, 0.06 }, { 63.2, 63.2, 0.35 } };
+            std::vector<float> gv; std::vector<double> gt;
+            double ph = 0;
+            for (auto& sg : segs)
+                for (int i = 0; i < (int) (sg.dur * SR); ++i)
+                {
+                    const double u = (double) i / (sg.dur * SR);
+                    const double mm = sg.from + (sg.to - sg.from) * (0.5 - 0.5 * std::cos (juce::MathConstants<double>::pi * u));
+                    const double f0 = 440.0 * std::pow (2.0, (mm - 69) / 12.0);
+                    ph += f0 / SR;
+                    double sm = 0;
+                    for (int h = 1; h <= 30; ++h) sm += envAt (VO, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                    gv.push_back ((float) (0.1 * sm * std::min (1.0, (double) gv.size() / (0.03 * SR))));
+                    gt.push_back (mm);
+                }
+            int lg = 0;
+            auto go = run (gv, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, lg);
+            int bad = 0, cnt = 0;
+            for (int64_t c = (int64_t) (0.2 * SR); c < (int64_t) gt.size() - 2400; c += 240)
+            {
+                const double mo = measure (go.getReadPointer (0), go.getNumSamples(), c + lg);
+                if (mo < 0) continue;
+                ++cnt;
+                if (std::abs (mo - gt[(size_t) c]) > 1.1) ++bad;   // escaleira: como moito medio semitono máis a histérese
+            }
+            const double pct = 100.0 * bad / std::max (1, cnt);
+            std::printf ("glisandos: %.1f %% de tramas a máis de 1,1 semitonos da voz (%d tramas)\n", pct, cnt);
+            metric (M + ".glisandos.pct", pct);
+            // antes da decisión por voz: directo 22,6 %, preciso 15,8 %, estudio 21,8 %
+            check (q == 0 ? "directo: glisandos sen arrastrar a nota" : q == 1 ? "preciso: glisandos sen arrastrar a nota" : "estudio: glisandos sen arrastrar a nota", pct < 5.0);
+        }
+
         // tolerancia 40 cents e notas libres: case non se toca
         {
             auto tl = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "tolerancia", 40); }, lat);

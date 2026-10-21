@@ -46,10 +46,11 @@ struct Case
     double snr = 1e9;              // ruído rosa de fondo
     double reverb = 0.0;           // nivel da reverberación (0 = sen)
     double vib = 0.2;              // fondo do vibrato (semitonos)
+    bool fric = false;             // consoantes xordas («s», «x», «f») nos silencios
     int range = tune::Analysis::General;
 };
 
-struct Signal { std::vector<float> x; std::vector<double> truth; };   // truth < 0: sen voz
+struct Signal { std::vector<float> x; std::vector<double> truth; std::vector<char> fric; };   // truth < 0: sen voz
 
 Signal synth (const Case& cs, uint32_t seed)
 {
@@ -116,6 +117,32 @@ Signal synth (const Case& cs, uint32_t seed)
         }
         for (size_t i = 0; i < y.size(); ++i) s.x[i] += y[i];
     }
+    if (cs.fric)
+    {
+        // consoantes xordas en cada silencio, ao nivel da voz menos 6 dB: «s» (4–9 kHz), «x»
+        // (2–5 kHz) e «f» (1–8 kHz, máis feble). O detector non pode dicir que teñen ton
+        s.fric.assign (s.x.size(), 0);
+        size_t i = 0; int kind = 0;
+        while (i < s.x.size())
+        {
+            if (s.truth[i] >= 0) { ++i; continue; }
+            size_t j = i; while (j < s.x.size() && s.truth[j] < 0) ++j;
+            const double lo = kind == 0 ? 4000 : kind == 1 ? 2000 : 1000, hi = kind == 0 ? 9000 : kind == 1 ? 5000 : 8000;
+            const double lvl = kind == 2 ? 0.25 : 0.5;   // potencia relativa á da voz
+            tune::Biquad hp1, lp1; hp1.lowpass (lo, SR); lp1.lowpass (hi, SR);
+            std::vector<double> nz (j - i); double pn = 1e-20;
+            for (size_t k = 0; k < nz.size(); ++k) { const double w = g (rng); const double l = hp1.process (w); nz[k] = lp1.process (w - l); pn += nz[k] * nz[k]; }
+            pn /= (double) nz.size();
+            const double kk = std::sqrt (pv * lvl / pn);
+            for (size_t k = 0; k < nz.size(); ++k)
+            {
+                const double fade = std::min (1.0, std::min ((double) k, (double) (nz.size() - k)) / (0.01 * SR));
+                s.x[i + k] += (float) (kk * nz[k] * fade);
+                s.fric[i + k] = 1;
+            }
+            i = j; kind = (kind + 1) % 3;
+        }
+    }
     if (cs.snr < 1e8)
     {
         // ruído rosa (Voss-McCartney simplificado: tres polos)
@@ -142,6 +169,15 @@ std::vector<Note> melody (double base)
     const double gp[] = { 0, 0.08, 0, 0.12, 0, 0, 0.05, 0, 0, 0.2, 0, 0.06, 0, 0, 0.1, 0.3 };
     std::vector<Note> v;
     for (int i = 0; i < 16; ++i) v.push_back ({ base + iv[i], du[i], gp[i], i % 3 });
+    return v;
+}
+
+// notas curtas con silencios de 0,2 s (para as consoantes)
+std::vector<Note> melodyGaps (double base)
+{
+    const double iv[] = { 0, 4, 7, 12, 11, 7, 5, 4, 2, 0, -3, 0 };
+    std::vector<Note> v;
+    for (int i = 0; i < 12; ++i) v.push_back ({ base + iv[i], 0.3, 0.2, i % 3 });
     return v;
 }
 
@@ -177,6 +213,13 @@ Res evaluate (const Case& cs, const Signal& s)
                 if (std::abs (d) > 0.5) ++nErr;
                 if (std::abs (std::abs (d) - 12.0) < 0.5) { ++nOct; if (d > 0) ++nUp; }
             }
+        }
+        else if (cs.fric)
+        {
+            // nunha consoante, despois de 30 ms (o que tarda en irse a vogal da xanela)
+            bool past = true;
+            for (int k = 1; k <= 30 && past; ++k) if (i - (size_t) lag >= (size_t) k * 48 && s.truth[i - (size_t) lag - (size_t) k * 48] >= 0) past = false;
+            if (past && s.fric[i - (size_t) lag]) { ++nSil; if (e.isVoiced()) ++nFalse; }
         }
         else
         {
@@ -214,6 +257,13 @@ int main (int argc, char** argv)
     add ("home_grave",       40, [] (Case& c) { c.vib = 0.15; });
     add ("soprano_aguda",    72, [] (Case& c) { c.vib = 0.3; });
     add ("vibrato_ancho",    62, [] (Case& c) { c.vib = 0.7; });
+    // máis voz aireada (para non axustar a un só caso): menos aire, grave e aguda
+    add ("aireada_10db",     60, [] (Case& c) { c.hnr = 10.0; });
+    add ("aireada_grave",    48, [] (Case& c) { c.hnr = 3.0; });
+    add ("aireada_aguda",    69, [] (Case& c) { c.hnr = 3.0; });
+    // consoantes xordas entre vogais: non poden ter ton (a voz aireada tampouco as pode coller)
+    add ("consoantes",       57, [] (Case& c) { c.notes = melodyGaps (57); c.fric = true; });
+    add ("consoantes_aire",  60, [] (Case& c) { c.notes = melodyGaps (60); c.fric = true; c.hnr = 3.0; });
 
     std::map<std::string, double> metrics;
     std::printf ("%-18s %7s %7s %7s %7s %7s\n", "caso", "erro", "oitava", "(arriba)", "perde", "falsa");

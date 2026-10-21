@@ -63,6 +63,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "comparar", 1 }, U ("Comparar (voz orixinal)"), false));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, U ("Bypass"), false));
 
+    // aire: alento enriba da voz
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "aire", 1 }, U ("Aire"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " %"; })));
+
     // MIDI
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "bend_rango", 1 }, U ("Rango do pitch bend"), 1, 24, 2,
         AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return String (v) + " st"; })));
@@ -140,6 +144,7 @@ TuneProcessor::TuneProcessor()
     pVgTrem = params.getRawParameterValue ("vibgen_tremolo");
     pAfin = params.getRawParameterValue ("afinacion");
     pBendRange = params.getRawParameterValue ("bend_rango");
+    pAir = params.getRawParameterValue ("aire");
     pMidiOut = params.getRawParameterValue ("midi_saida");
     for (int i = 0; i < 12; ++i) pCents[(size_t) i] = params.getRawParameterValue ("cents" + juce::String (i));
     pHarmMode = params.getRawParameterValue ("armonia_modo");
@@ -230,6 +235,12 @@ void TuneProcessor::prepareToPlay (double sr, int)
     switchGain = 1.0f; switchState = 0; switchStep = (float) (1.0 / (0.005 * sr));
     midiOutNote = -1; midiOutSilence = 0; midiOutHold = (int) (0.04 * sr);
     midiOutPending = -1; midiOutPendingAge = 0; midiOutMinDur = (int) (0.03 * sr);
+    airSm.reset (sr, 0.05); airSm.setCurrentAndTargetValue (pAir->load() * 0.01f);
+    airEnv = 0; airHp1 = airHp2 = 0; airPrev = 0; airLp = 0;
+    airEnvA = (float) (1.0 - std::exp (-1.0 / (0.008 * sr)));
+    airHpA = (float) std::exp (-2.0 * juce::MathConstants<double>::pi * 2000.0 / sr);
+    airLpA = (float) (1.0 - std::exp (-2.0 * juce::MathConstants<double>::pi * 9000.0 / sr));
+    airGate = 0;
     midiOutBuf.ensureSize (2048);
     leadSm.reset (sr, 0.03); leadSm.setCurrentAndTargetValue (leadGainTarget());
     harmSm.reset (sr, 0.03); harmSm.setCurrentAndTargetValue (pComp->load() > 0.5f ? 0.0f : 1.0f);
@@ -485,6 +496,7 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         harmS[(size_t) h].del.setTargetValue ((float) (hp.delay->load() * 0.001 * getSampleRate()));
     }
     leadSm.setTargetValue (leadGainTarget());
+    airSm.setTargetValue (pAir->load() * 0.01f);
     harmSm.setTargetValue (pComp->load() > 0.5f ? 0.0f : 1.0f);   // comparar: só a voz orixinal
     engine.freeMask = freeMask();
     engine.transpose = std::round (pTrans->load());
@@ -539,6 +551,22 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         }
         int rd = dryPos - lat; if (rd < 0) rd += dsz;
         const float mix = mixSm.getNextValue(), g = gainSm.getNextValue(), byp = bypassSm.getNextValue(), lead = leadSm.getNextValue();
+        // aire: ruído por riba de ~2 kHz que segue a envolvente da voz afinada, só con voz
+        const float airAmt = airSm.getNextValue();
+        if (airAmt > 0.0f)
+        {
+            const float w0 = ech == 2 ? 0.5f * (wet[0] + wet[1]) : wet[0];
+            airEnv += (std::abs (w0) - airEnv) * airEnvA;
+            airGate += ((engine.isVoiced() ? 1.0f : 0.0f) - airGate) * airEnvA;
+            airRng = airRng * 1664525u + 1013904223u;
+            const float nz = (float) (int32_t) airRng * (1.0f / 2147483648.0f);
+            // paso alto de 2.ª orde (dous polos) e un paso baixo suave a 9 kHz
+            const float h1 = airHpA * (airHp1 + nz - airPrev); airPrev = nz; airHp1 = h1;
+            const float h2 = airHpA * (airHp2 + h1 - airHp1Prev); airHp1Prev = h1; airHp2 = h2;
+            airLp += (h2 - airLp) * airLpA;
+            const float a = airLp * airEnv * airGate * airAmt * 1.2f;   // (vai na voz afinada: a mestura aplícase despois)
+            for (int c = 0; c < ech; ++c) wet[c] += a;
+        }
         float peakIn = 0, peakOut = 0;
         for (int c = 0; c < ech; ++c)
         {

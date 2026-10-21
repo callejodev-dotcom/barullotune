@@ -198,6 +198,10 @@ private:
     std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman, *pPrincipal, *pHarmMode;
     std::atomic<float>* pVgDepth, *pVgRate, *pVgDelay, *pVgVar, *pVgTrem, *pAfin, *pBendRange, *pMidiOut;
     juce::MidiBuffer midiOutBuf;
+    std::atomic<float>* pAir = nullptr;
+    juce::SmoothedValue<float> airSm;
+    float airEnv = 0, airGate = 0, airHp1 = 0, airHp2 = 0, airHp1Prev = 0, airPrev = 0, airLp = 0, airEnvA = 0.003f, airHpA = 0.77f, airLpA = 0.7f;
+    uint32_t airRng = 22222u;
     int midiOutNote = -1, midiOutSilence = 0, midiOutHold = 1920, midiOutPending = -1, midiOutPendingAge = 0, midiOutMinDur = 1440;
     std::array<std::atomic<float>*, 12> pCents {};
     struct HarmParams { std::atomic<float>* on, *interval, *level, *pan, *detune, *delay, *formant; };

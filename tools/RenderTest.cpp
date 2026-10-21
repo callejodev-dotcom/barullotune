@@ -869,6 +869,30 @@ int main (int argc, char** argv)
                d0 < 6.0 && d1 > 24.0 && d1 < 38.0 && r1 > 4.8 && r1 < 6.2 && tremDb > 2.5 && tremDb < 5.0);   // trémolo 40 %: 1 ± 0,2 = 3,5 dB
     }
 
+    // aire: máis enerxía por riba de 4 kHz canto máis aire, e nada no silencio
+    {
+        auto hfRatio = [&] (float air, double& silence)
+        {
+            int l = 0;
+            std::vector<float> vs (voice); vs.resize (voice.size() + (size_t) (0.5 * SR), 0.0f);   // medio segundo de silencio ao final
+            auto y = run (vs, 512, 1, [&] (TuneProcessor& p) { major (p); setP (p, "aire", air); }, l);
+            // enerxía por riba de 4 kHz (diferenzas de 2.ª orde) fronte á total, onde hai voz
+            double hf = 0, tot = 0; silence = 0;
+            const float* x = y.getReadPointer (0);
+            for (size_t i = 2; i < truth.size(); ++i)
+            {
+                const double v = x[i + (size_t) l], d2 = x[i + (size_t) l] - 2.0 * x[i + (size_t) l - 1] + x[i + (size_t) l - 2];
+                if (truth[i] >= 0) { hf += d2 * d2; tot += v * v; }
+            }
+            for (int i = (int) voice.size() + l + (int) (0.1 * SR); i < y.getNumSamples(); ++i) silence = std::max (silence, (double) std::abs (x[i]));
+            return 10.0 * std::log10 (hf / std::max (1e-20, tot));
+        };
+        double s0 = 0, s1 = 0;
+        const double r0 = hfRatio (0, s0), r1 = hfRatio (60, s1);
+        std::printf ("aire 60 %%: agudos (relación) %+.1f dB fronte a sen aire; no silencio do final, pico %.5f\n", r1 - r0, s1);
+        check ("aire: alento con voz, nada sen ela", r1 - r0 > 3.0 && s1 < 1.0e-3);
+    }
+
     // consoantes xordas ao transpor ±7: a «s» sae co seu nivel e sen estalos (antes, en
     // Directo baixando, ata 11 dB máis forte e cun estalo de 10 ms na fronteira coa vogal)
     {

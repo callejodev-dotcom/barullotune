@@ -714,7 +714,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     for (int i = 0; i < (int) scales::all().size(); ++i) escala.addItem (U (scales::all()[(size_t) i].name), i + 1);
     const char* voces[] = { "Baixo", "Barítono", "Tenor", "Alto", "Mezzo", "Soprano", "Calquera" };
     for (int i = 0; i < 7; ++i) voz.addItem (U (voces[i]), i + 1);
-    afin.addItem ("Igual", 1); afin.addItem ("Xusta", 2); afin.addItem ("Personalizada", 3);
+    afin.addItem ("Igual", 1); afin.addItem ("Xusta", 2); afin.addItem ("Personalizada", 3); afin.addItem ("MTS-ESP", 4);
     tonicaAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, "tonica", tonica);
     escalaAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, "escala", escala);
     vozAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.params, "rango", voz);
@@ -722,7 +722,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     tonica.setTooltip (U ("Tónica da escala."));
     escala.setTooltip (U ("Escala. Cromática corrixe a calquera semitono; «Personalizada» son as notas que acendas no teclado."));
     voz.setTooltip (U ("Tipo de voz: o afinador só busca notas no seu rango (máis rápido e sen saltos de oitava). No teclado, o que queda fóra vese máis escuro."));
-    afin.setTooltip (U ("Afinación: Igual (os doce semitonos iguais), Xusta (respecto da tónica: terceiras e quintas puras) ou Personalizada (os cents de cada nota: maiúsculas + arrastrar no teclado)."));
+    afin.setTooltip (U ("Afinación: Igual (os doce semitonos iguais), Xusta (respecto da tónica: terceiras e quintas puras), Personalizada (os cents de cada nota: maiúsculas + arrastrar no teclado) ou MTS-ESP (a que diga o mestre de MTS-ESP, ou as mensaxes MIDI de afinación)."));
     for (auto* c : { &tonica, &escala, &voz, &afin }) canvas.addAndMakeVisible (c);
     scl.setButtonText (".scl");
     scl.getProperties().set ("fontSize", 13.0f);

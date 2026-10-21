@@ -1323,6 +1323,33 @@ int main (int argc, char** argv)
         std::printf ("afinación dun Mi en Do maior: igual %+.1f c, xusta %+.1f c (agardado −13,7), personalizada %+.1f c (agardado +30)\n", cEq, cJust, cCust);
         check ("afinación igual, xusta e personalizada", std::abs (cEq) < 1.5 && std::abs (cJust + 13.69) < 1.5 && std::abs (cCust - 30.0) < 1.5);
 
+        // MTS (MIDI Tuning Standard, mensaxe de afinación dunha nota): o Mi (64) a 63,75,
+        // −25 cents; coa afinación MTS-ESP, un Mi cantado vai aí
+        {
+            TuneProcessor p;
+            p.setPlayConfigDetails (1, 1, SR, 512);
+            setP (p, "calidade", 2); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "afinacion", 3);
+            p.prepareToPlay (SR, 512);
+            const int lt = p.getLatencySamples();
+            juce::AudioBuffer<float> buf (1, 512), out (1, (int) e4.size() + lt);
+            const juce::uint8 sx[] = { 0xF0, 0x7F, 0x7F, 0x08, 0x02, 0x00, 0x01, 64, 63, 96, 0, 0xF7 };
+            for (int pos = 0; pos < (int) e4.size(); pos += 512)
+            {
+                const int nn = juce::jmin (512, (int) e4.size() - pos);
+                buf.setSize (1, nn, false, false, true);
+                for (int i = 0; i < nn; ++i) buf.setSample (0, i, e4[(size_t) (pos + i)]);
+                juce::MidiBuffer m;
+                if (pos == 0) m.addEvent (juce::MidiMessage (sx, (int) sizeof (sx)), 0);
+                p.processBlock (buf, m);
+                out.copyFrom (0, pos, buf, 0, 0, nn);
+            }
+            double acc = 0; int cnt = 0;
+            for (int64_t c = (int64_t) (0.3 * SR); c < (int64_t) (1.1 * SR); c += 240) { const double mo = measure (out.getReadPointer (0), out.getNumSamples(), c + lt); if (mo > 0) { acc += mo; ++cnt; } }
+            const double cM = (acc / std::max (1, cnt) - 64.0) * 100.0;
+            std::printf ("afinación MTS (mensaxe MIDI): Mi %+.1f c (agardado −25)\n", cM);
+            check ("afinación MTS-ESP / MIDI Tuning Standard", std::abs (cM + 25.0) < 1.5);
+        }
+
         // Scala: unha escala xusta de 7 notas (Ptolomeo) en Re, e unha de 17 notas (erro)
         TuneProcessor sc; setP (sc, "tonica", 2);
         juce::String err;

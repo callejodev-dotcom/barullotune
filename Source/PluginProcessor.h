@@ -119,7 +119,7 @@ class TuneProcessor : public juce::AudioProcessor, private juce::AsyncUpdater
 {
 public:
     TuneProcessor();
-    ~TuneProcessor() override { cancelPendingUpdate(); }
+    ~TuneProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -188,6 +188,9 @@ public:
     // desde a tónica) e a afinación Personalizada cos cents de cada unha. Escalas de ata 12
     // graos por oitava; se dous graos caen na mesma nota, erro.
     bool loadScala (const juce::String& text, juce::String& error);
+    // MTS-ESP: ¿hai un mestre?, e o nome da súa escala
+    bool mtsConnected() const;
+    juce::String mtsScaleName() const;
 
     // detectar a tonalidade escoitando a voz uns segundos
     static constexpr float keyListenSeconds = 8.0f;
@@ -220,6 +223,8 @@ private:
     void process (juce::AudioBuffer<float>&, juce::MidiBuffer&, bool hostBypass);
     float leadGainTarget() const;
     void harmGains (int h, float& gl, float& gr) const;
+    void applyMtsTuning();
+    struct MTSClient* mts = nullptr;
 
     tune::Engine engine;
     std::array<std::vector<float>, 2> dry;

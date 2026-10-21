@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "libMTSClient.h"
 
 namespace
 {
@@ -23,7 +24,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     for (int i = 0; i < 12; ++i)
         l.add (std::make_unique<AudioParameterBool> (ParameterID { "libre" + String (i), 1 }, U ("Libre ") + scales::noteName (i), false));
     // afinación: igual (12 semitonos iguais), xusta (respecto da tónica) ou personalizada (cents por nota)
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "afinacion", 1 }, U ("Afinación"), StringArray { U ("Igual"), U ("Xusta"), U ("Personalizada") }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "afinacion", 1 }, U ("Afinación"), StringArray { U ("Igual"), U ("Xusta"), U ("Personalizada"), U ("MTS-ESP") }, 0));
     for (int i = 0; i < 12; ++i)
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { "cents" + String (i), 1 }, U ("Cents ") + scales::noteName (i), NormalisableRange<float> (-50.0f, 50.0f, 0.01f), 0.0f,
             AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " c"; })));
@@ -167,6 +168,7 @@ TuneProcessor::TuneProcessor()
     for (auto& h : keyHist) h = 0;
     for (auto& h : chroma) h = 0;
 
+    mts = MTS_RegisterClient();
     engine.prepare (44100.0);
     latencyNow = -1;
     applyEngineSettings();
@@ -310,9 +312,40 @@ void TuneProcessor::harmGains (int h, float& gl, float& gr) const
     gr = g * std::sin (a) * juce::MathConstants<float>::sqrt2;
 }
 
+TuneProcessor::~TuneProcessor()
+{
+    cancelPendingUpdate();
+    if (mts != nullptr) MTS_DeregisterClient (mts);
+}
+
+bool TuneProcessor::mtsConnected() const { return mts != nullptr && MTS_HasMaster (mts); }
+
+juce::String TuneProcessor::mtsScaleName() const
+{
+    if (! mtsConnected()) return {};
+    const char* n = MTS_GetScaleName (mts);
+    return n != nullptr ? juce::String::fromUTF8 (n) : juce::String();
+}
+
+// MTS-ESP: a frecuencia de cada nota segundo o mestre (ou as mensaxes MIDI de afinación),
+// como altura MIDI respecto do La de referencia
+void TuneProcessor::applyMtsTuning()
+{
+    const bool on = juce::jlimit (0, 3, (int) pAfin->load()) == 3 && mts != nullptr && (MTS_HasMaster (mts) || MTS_HasReceivedMTSSysEx (mts));
+    engine.useNoteCents = on;
+    if (! on) return;
+    const double ref = juce::jmax (1.0, (double) pLa->load());
+    for (int n = 0; n < 128; ++n)
+    {
+        const double f = MTS_NoteToFrequency (mts, (char) n, -1);
+        engine.noteCents[n] = f > 0 ? juce::jlimit (-1200.0, 1200.0, (69.0 + 12.0 * std::log2 (f / ref) - n) * 100.0) : 0.0;
+        engine.noteBlocked[n] = MTS_ShouldFilterNote (mts, (char) n, -1) ? 1 : 0;
+    }
+}
+
 void TuneProcessor::tuningCents (double* c) const
 {
-    const int mode = juce::jlimit (0, 2, (int) pAfin->load()), tonic = (int) pTonica->load();
+    const int mode = juce::jlimit (0, 3, (int) pAfin->load()), tonic = (int) pTonica->load();
     for (int pc = 0; pc < 12; ++pc)
         c[pc] = mode == 1 ? scales::justCents (pc - tonic) : mode == 2 ? (double) pCents[(size_t) pc]->load() : 0.0;
 }
@@ -603,6 +636,7 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     engine.humanize = pHuman->load() * 0.01;
     engine.harmonyMode = juce::jlimit (0, 1, (int) pHarmMode->load());
     tuningCents (engine.tuneCents);
+    applyMtsTuning();
     engine.bendRange = pBendRange->load();
     engine.vibDepth = pVgDepth->load();
     engine.vibRate = pVgRate->load();
@@ -663,6 +697,7 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             else if (m.isNoteOff()) engine.noteOff (m.getNoteNumber());
             else if (m.isPitchWheel()) engine.setPitchBend (m.getPitchWheelValue(), m.getChannel());
             else if (m.isAllNotesOff() || m.isAllSoundOff()) engine.allNotesOff();
+            else if (m.isSysEx() && mts != nullptr) MTS_ParseMIDIDataU (mts, m.getRawData(), m.getRawDataSize());   // afinación MIDI (MTS)
         }
         // estéreo de verdade: o ton detéctase no centro e as dúas canles corríxense igual
         const int ech = numIn >= 2 && numCh >= 2 ? 2 : 1;

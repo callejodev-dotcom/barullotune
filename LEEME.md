@@ -23,7 +23,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Mandos en catro pestanas**: Corrección (velocidade, transición, tolerancia, flexibilidade, humanizar, vibrato, cantidade), Voz (formantes, transpor, aire e o vibrato xerado), Armonías (a voz principal e unha fila por armonía: intervalo, nivel, panorama, desafinar, atraso e formantes) e Saída (La, mestura, volume, bend e notas MIDI).
 - **Cabeceira**: presets (os de fábrica e os teus; gardar o actual, abrir a carpeta, copiar A en B), **A/B**, comparar, **desfacer e refacer**, e o xeito.
 - **Tónica e escala** (cromática, maior, menor natural, harmónica e melódica, pentatónicas, blues e blues maior, dórica, frixia, lidia, mixolidia, locria, frixia dominante —a do flamenco—, dobre harmónica, tons enteiros, disminuída, hirajoshi ou personalizada) e **Detectar**: canta uns segundos e escolle a tonalidade. Se lle mandas a base pola **entrada lateral** («Acompañamento»), escoita tamén os acordes (o croma da base pesa un 70 %) e abonda con poñer a base, sen cantar.
-- **Afinación**: igual (os doce semitonos iguais), xusta (5-limit respecto da tónica: a terceira maior 13,7 cents baixa, a quinta 2 cents alta…) ou personalizada (cents de cada nota, ±50). **Importar Scala** (.scl): a escala e os cents de cada grao desde a tónica (ata 12 graos por oitava). A decisión da nota, a corrección e as armonías van á nota coa súa afinación.
+- **Afinación**: igual (os doce semitonos iguais), xusta (5-limit respecto da tónica: a terceira maior 13,7 cents baixa, a quinta 2 cents alta…) personalizada (cents de cada nota, ±50) ou **MTS-ESP** (cada nota onde diga o mestre de MTS-ESP, sen ter que repetirse por oitavas, e as notas que o mestre non usa quedan fóra; tamén as mensaxes MIDI de afinación, MTS SysEx). **Importar Scala** (.scl): a escala e os cents de cada grao desde a tónica (ata 12 graos por oitava). A decisión da nota, a corrección e as armonías van á nota coa súa afinación.
 - **Voz**: baixo, barítono, tenor, alto, mezzo, soprano ou calquera. O afinador só busca no seu rango (sen saltos de oitava).
 - **Modos**: escala, MIDI como escala (as notas que tocas fan de escala) e MIDI nota (a voz vai á nota que tocas; a roda de pitch bend dóbraa no rango que escollas, de 1 a 24 semitonos). Compatible con **MPE**: cada nota dóbraa o bend da súa canle (e o da canle mestra).
 - **MIDI de saída**: as notas que cantas saen como notas MIDI (para tocar un sintetizador coa voz), coa velocidade segundo o nivel. Unha nota sae cando a voz leva 30 ms nela, así as notas de paso dos glisandos non saen.
@@ -87,6 +87,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Glisandos** sintéticos (ata 40 st/s), robot: tramas con a saída a máis de 1,1 semitonos da voz: 2,6–2,9 % (antes 16–23 %).
 - **Vibrato rápido con tremor** (6,2 Hz, ±45 c, tremor de período de 0,6 % ciclo a ciclo), robot: a nota queda plana a 2,4 c en Directo (antes 6,0 c), 0,6 c en Preciso e 0,1 c en Estudio.
 - **Condicións reais**: voz moi baixa (picos a −45 dBFS), ruído rosa a 20 dB de SNR, reverberación e 96 kHz: afina igual ca coa voz limpa (con ruído a 10 dB, algo menos).
+- **MTS**: unha mensaxe MIDI de afinación (o Mi a 63,75) coa afinación MTS-ESP: o Mi cantado sae a −25,0 c.
 - **Tonalidade co acompañamento**: base en Re maior (Re–Sol–La–Re) pola entrada lateral e a voz cantando só un La: Re maior en 8 s. (Sumar os histogramas facía mandar a nota longa da voz, La maior; agora cada un correlaciónase cos perfís por separado. E o croma necesita barras finas: cunha FFT de 4096 os graves repartíanse entre notas veciñas e saía Fa♯ menor; con 16 384, Re maior.)
 - **MIDI de saída**: a melodía de proba dá exactamente as súas 12 notas, na orde e sen solaparse. **MPE**: unha nota na canle 3 con bend na canle 3 (rango 4) sube a 64,02; co bend na canle 5, queda en 60,00.
 - **Afinación** dun Mi en Do maior (robot): igual +0,0 c, xusta −13,7 c, personalizada (+30) +30,0 c. **Scala**: a diatónica de Ptolomeo en Re carga as notas de Re maior co Fa♯ −13,69 c e o Mi +3,91 c; unha de 17 notas por oitava rexéitase cunha explicación. Os estados da versión 1 con escala «Personalizada» seguen sendo Personalizada.
@@ -120,6 +121,7 @@ A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 ## Créditos
 
 - Detector de ton baseado en YIN (de Cheveigné e Kawahara, 2002). Desprazamento por TD-PSOLA (Moulines e Charpentier, 1990). Código propio.
+- Cliente de MTS-ESP de ODDSound (licenza 0BSD), en `third_party/mts-esp`.
 
 ## Licencia
 

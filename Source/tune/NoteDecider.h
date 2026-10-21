@@ -52,6 +52,7 @@ private:
 // ¿pódese ir a esta nota? (escala, notas libres ou as teclas MIDI)
 inline bool noteAllowed (const Settings& set, const MidiState& midi, int note)
 {
+    if (set.useNoteCents && note >= 0 && note < 128 && set.noteBlocked[note]) return false;
     const int pc = ((note % 12) + 12) % 12;
     if ((set.mode == Settings::MidiScale || set.mode == Settings::MidiNote) && midi.heldMask != 0) return (midi.heldMask >> pc) & 1;
     const int deg = ((pc - set.key) % 12 + 12) % 12;

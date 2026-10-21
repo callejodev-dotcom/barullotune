@@ -26,9 +26,18 @@ struct Settings
     double flex = 0.0;         // 0..1: canto máis lonxe da nota, menos se corrixe (blue notes, arrastres)
     double humanize = 0.0;     // 0..1: nas notas longas a corrección vaise relaxando
     double tuneCents[12] {};   // afinación: cents de cada clase de altura (absoluta, 0 = Do)
+    // afinación nota a nota (MTS-ESP: cada nota pode ir a onde diga o mestre, sen repetirse
+    // por oitavas); se useNoteCents, manda isto e non tuneCents
+    bool useNoteCents = false;
+    double noteCents[128] {};
+    uint8_t noteBlocked[128] {};   // notas que o mestre de MTS-ESP non usa
 
     // a altura (MIDI, con decimais) á que vai unha nota coa afinación
-    double pitchOf (int note) const { return note + tuneCents[((note % 12) + 12) % 12] * 0.01; }
+    double pitchOf (int note) const
+    {
+        if (useNoteCents && note >= 0 && note < 128) return note + noteCents[note] * 0.01;
+        return note + tuneCents[((note % 12) + 12) % 12] * 0.01;
+    }
 
     // vibrato xerado (enriba do da voz, que se escala con «vibrato»)
     double vibDepth = 0.0;     // cents (0 = sen vibrato xerado)

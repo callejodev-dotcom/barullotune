@@ -17,6 +17,7 @@ public:
     {
         sr = sampleRate;
         corr.prepare (sr);
+        corr.setVoice (role.harmony ? role.index + 1 : 0);
         decider.prepare (sr);
         for (int c = 0; c < (role.harmony ? 1 : 2); ++c) outCh[c].assign ((size_t) an.ringSize, 0.0);   // unha armonía é mono
     }
@@ -140,11 +141,11 @@ private:
             if (! role.harmony) an.correctionCents = 0;
         }
         // unha armonía só soa cando hai voz e nota (sen ton, as consoantes dobradas emborranan)
-        double g = 1.0;
+        double g = synVoiced ? state.ampMod : 1.0;   // (e o trémolo do vibrato xerado)
         if (role.harmony)
         {
             gate += ((sounding ? 1.0 : 0.0) - gate) * (1.0 - std::exp (-spacing / (0.01 * sr)));
-            g = gate;
+            g *= gate;
         }
         const int half = (int) std::ceil (P);
         const int64_t c = (int64_t) std::floor (nextSyn);

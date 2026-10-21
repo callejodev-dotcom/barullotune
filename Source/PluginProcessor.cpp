@@ -58,6 +58,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "comparar", 1 }, U ("Comparar (voz orixinal)"), false));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, U ("Bypass"), false));
 
+    // vibrato xerado
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_fondo", 1 }, U ("Vibrato xerado: fondo"), NormalisableRange<float> (0.0f, 100.0f, 0.1f, 0.6f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " c"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_velocidade", 1 }, U ("Vibrato xerado: velocidade"), NormalisableRange<float> (2.0f, 10.0f, 0.01f), 5.5f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " Hz"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_retardo", 1 }, U ("Vibrato xerado: retardo"), NormalisableRange<float> (0.0f, 1500.0f, 1.0f, 0.5f), 300.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " ms"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_variacion", 1 }, U ("Vibrato xerado: variación"), NormalisableRange<float> (0.0f, 100.0f), 30.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_tremolo", 1 }, U ("Vibrato xerado: trémolo"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " %"; })));
+
     // armonías
     auto dbFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v <= -47.9f ? String ("non") : String (v, 1) + " dB"; });
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "principal", 1 }, U ("Voz principal"), NormalisableRange<float> (-48.0f, 6.0f, 0.1f), 0.0f, dbFmt));
@@ -111,6 +123,11 @@ TuneProcessor::TuneProcessor()
     pComp = params.getRawParameterValue ("comparar");
     pBypass = params.getRawParameterValue ("bypass");
     pPrincipal = params.getRawParameterValue ("principal");
+    pVgDepth = params.getRawParameterValue ("vibgen_fondo");
+    pVgRate = params.getRawParameterValue ("vibgen_velocidade");
+    pVgDelay = params.getRawParameterValue ("vibgen_retardo");
+    pVgVar = params.getRawParameterValue ("vibgen_variacion");
+    pVgTrem = params.getRawParameterValue ("vibgen_tremolo");
     pHarmMode = params.getRawParameterValue ("armonia_modo");
     for (int h = 0; h < numHarmonies; ++h)
     {
@@ -372,6 +389,11 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     engine.flex = pFlex->load() * 0.01;
     engine.humanize = pHuman->load() * 0.01;
     engine.harmonyMode = juce::jlimit (0, 1, (int) pHarmMode->load());
+    engine.vibDepth = pVgDepth->load();
+    engine.vibRate = pVgRate->load();
+    engine.vibDelayMs = pVgDelay->load();
+    engine.vibVariation = pVgVar->load() * 0.01;
+    engine.tremolo = pVgTrem->load() * 0.01;
     bool anyHarm = false;
     for (int h = 0; h < numHarmonies; ++h)
     {

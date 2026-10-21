@@ -26,6 +26,13 @@ struct Settings
     double flex = 0.0;         // 0..1: canto máis lonxe da nota, menos se corrixe (blue notes, arrastres)
     double humanize = 0.0;     // 0..1: nas notas longas a corrección vaise relaxando
 
+    // vibrato xerado (enriba do da voz, que se escala con «vibrato»)
+    double vibDepth = 0.0;     // cents (0 = sen vibrato xerado)
+    double vibRate = 5.5;      // Hz
+    double vibDelayMs = 300.0; // desde o comezo da nota
+    double vibVariation = 0.3; // 0..1: a velocidade e o fondo varían amodo, coma nunha voz
+    double tremolo = 0.0;      // 0..1: modulación de nivel ao compás do vibrato
+
     // armonías: voces novas a partir da voz cantada
     static constexpr int maxHarmonies = 4;
     enum HarmonyMode { HarmonyScale = 0, HarmonyMidiChord = 1 };
@@ -60,7 +67,12 @@ struct CorrState
     double prevCentre = 0, slope = 0;   // pendente do centro da voz (semitonos/s)
     // detector de vibrato: só se respecta unha oscilación regular (4–8 Hz, varios ciclos)
     double clock = 0, lastZc = -1e9, lastHalf = 0, vibEnv = 0, vibConf = 0; int vibSign = 0;
-    double noteAge = 0;   // mostras desde que empezou a nota (para humanizar)
+    double noteAge = 0;   // mostras desde que empezou a nota (para humanizar e o vibrato xerado)
+    // vibrato xerado: fase, variación lenta (ruído filtrado) e a modulación de nivel que sae
+    double genPhase = 0, genRateVar = 0, genDepthVar = 0, genRateGoal = 0, genDepthGoal = 0, genClock = 0;
+    uint32_t rng = 0x9E3779B9u;
+    bool seeded = false;
+    double ampMod = 1.0;
 };
 
 class Corrector
@@ -68,6 +80,8 @@ class Corrector
 public:
     explicit Corrector (const Settings& s) : set (s) {}
     void prepare (double sampleRate) { sr = sampleRate; }
+    // cada voz (a principal, cada armonía) co seu vibrato xerado: outra fase e outra variación
+    void setVoice (int index) { phase0 = index * 2.1; seed = 0x9E3779B9u ^ ((uint32_t) index * 0x85EBCA6Bu); if (seed == 0) seed = 1; }
 
     double alphaFor (double ms, double dt) const { return ms <= 0.0 ? 1.0 : 1.0 - std::exp (-dt / (ms * 0.001 * sr)); }
 
@@ -87,6 +101,8 @@ public:
             const double err = st.tS - m;
             st.cS = (free || std::abs (err) * 100.0 < set.tolCents) ? 0.0 : err * set.amount * flexFactor (err);
             st.lastTarget = tgt;
+            st.genPhase = phase0; st.ampMod = 1.0;
+            if (! st.seeded) { st.rng = seed; st.seeded = true; }
             outMidi = m + st.cS + transpose + bend;
             return st.cS + transpose + bend;
         }
@@ -116,8 +132,37 @@ public:
             if (outside && st.tolTimer >= set.tolMs * 0.001 * sr) want = err * set.amount * (1.0 - relax) * flexFactor (err);
         }
         st.cS += (want - st.cS) * alphaFor (speedFor (st), dt);
-        outMidi = centre + st.cS + set.vibrato * vib + transpose + bend;
+        outMidi = centre + st.cS + set.vibrato * vib + transpose + bend + generatedVibrato (st, dt);
         return outMidi - m;
+    }
+
+    // vibrato xerado (semitonos): un seno que entra despois do retardo (rampa de 200 ms),
+    // coa velocidade e o fondo variando amodo (±12 % e ±25 % co 100 % de variación), e
+    // deixa en st.ampMod a modulación de nivel (trémolo) ao mesmo compás
+    double generatedVibrato (CorrState& st, double dt) const
+    {
+        st.ampMod = 1.0;
+        if (set.vibDepth <= 0.0 && set.tremolo <= 0.0) return 0.0;
+        const double t = dt / sr;
+        // variación: cada ~250 ms un obxectivo novo ao chou, e achégase a el suavemente
+        st.genClock += t;
+        if (st.genClock >= 0.25)
+        {
+            st.genClock -= 0.25;
+            auto rnd = [&st] { st.rng ^= st.rng << 13; st.rng ^= st.rng >> 17; st.rng ^= st.rng << 5; return (double) st.rng / 4294967295.0 * 2.0 - 1.0; };
+            st.genRateGoal = rnd(); st.genDepthGoal = rnd();
+        }
+        const double a = 1.0 - std::exp (-t / 0.2);
+        st.genRateVar += (st.genRateGoal - st.genRateVar) * a;
+        st.genDepthVar += (st.genDepthGoal - st.genDepthVar) * a;
+        const double var = clampd (set.vibVariation, 0.0, 1.0);
+        const double rate = clampd (set.vibRate, 0.5, 15.0) * (1.0 + 0.12 * var * st.genRateVar);
+        st.genPhase += 2.0 * kPi * rate * t;
+        if (st.genPhase > 2.0 * kPi) st.genPhase -= 2.0 * kPi;
+        const double ramp = clampd ((st.noteAge / sr - set.vibDelayMs * 0.001) / 0.2, 0.0, 1.0);
+        const double sn = std::sin (st.genPhase) * ramp;
+        st.ampMod = 1.0 + 0.5 * clampd (set.tremolo, 0.0, 1.0) * sn;
+        return set.vibDepth * 0.01 * (1.0 + 0.25 * var * st.genDepthVar) * sn;
     }
 
     // banda do vibrato: pasa banda de 5,5 Hz, Q 1,2 (ganancia 1 no centro); dt en mostras
@@ -179,6 +224,8 @@ public:
 private:
     const Settings& set;
     double sr = 48000;
+    double phase0 = 0.0;
+    uint32_t seed = 0x9E3779B9u;
 };
 
 } // namespace tune

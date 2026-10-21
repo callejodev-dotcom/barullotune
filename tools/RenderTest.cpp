@@ -829,6 +829,46 @@ int main (int argc, char** argv)
         metric ("flexibilidade.lonxe.cents", std::abs (cFar0)); metric ("flexibilidade.preto.cents", std::abs (cNear1));
     }
 
+    // vibrato xerado: unha nota plana con robot e vibrato propio a 0 sae cun vibrato de
+    // ±30 c a 5,5 Hz despois do retardo (300 ms); antes, plana. Trémolo: o nivel oscila
+    for (int q : { 0, 2 })
+    {
+        std::vector<float> flat ((size_t) (2.0 * SR)); double ph = 0;
+        for (size_t i = 0; i < flat.size(); ++i)
+        {
+            const double f0 = 440.0 * std::pow (2.0, (62.0 - 69) / 12.0); ph += f0 / SR; double sm = 0;
+            for (int h = 1; h <= 30; ++h) sm += envAt (VE, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+            flat[i] = (float) (0.1 * sm * std::min (1.0, (double) i / (0.03 * SR)));
+        }
+        int l = 0;
+        auto y = run (flat, 512, 1, [&] (TuneProcessor& p) { setP (p, "calidade", (float) q); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
+                                                             setP (p, "vibgen_fondo", 30); setP (p, "vibgen_velocidade", 5.5f); setP (p, "vibgen_retardo", 300); setP (p, "vibgen_variacion", 0); setP (p, "vibgen_tremolo", 40); }, l);
+        std::vector<double> trace; std::vector<double> lv;
+        for (int64_t c = (int64_t) (0.05 * SR); c < (int64_t) (1.9 * SR); c += 96)
+        {
+            trace.push_back (measure (y.getReadPointer (0), y.getNumSamples(), c + l));
+            double e = 0; for (int k = -240; k < 240; ++k) e += (double) y.getSample (0, (int) (c + l + k)) * y.getSample (0, (int) (c + l + k));
+            lv.push_back (std::sqrt (e / 480.0));
+        }
+        auto stat = [&] (double t0, double t1, double& depth, double& rate)
+        {
+            const size_t a = (size_t) ((t0 - 0.05) * SR / 96), b = std::min (trace.size(), (size_t) ((t1 - 0.05) * SR / 96));
+            double mn = 1e9, mx = -1e9, mean = 0; int cnt = 0, zc = 0; double prev = 0;
+            for (size_t i = a; i < b; ++i) if (trace[i] > 0) { mean += trace[i]; ++cnt; }
+            mean /= std::max (1, cnt);
+            for (size_t i = a; i < b; ++i) if (trace[i] > 0) { mn = std::min (mn, trace[i]); mx = std::max (mx, trace[i]); const double d = trace[i] - mean; if (i > a && d * prev < 0) ++zc; prev = d; }
+            depth = (mx - mn) * 50.0; rate = zc / 2.0 / (t1 - t0);
+        };
+        double d0, r0, d1, r1;
+        stat (0.05, 0.28, d0, r0); stat (0.7, 1.85, d1, r1);
+        double lmin = 1e9, lmax = 0;
+        for (size_t i = (size_t) ((0.7 - 0.05) * SR / 96); i < lv.size(); ++i) { lmin = std::min (lmin, lv[i]); lmax = std::max (lmax, lv[i]); }
+        const double tremDb = 20 * std::log10 (lmax / std::max (1e-9, lmin));
+        std::printf ("vibrato xerado (%s): antes do retardo ±%.1f c; despois ±%.1f c a %.1f Hz; trémolo %.1f dB pico a pico\n", q == 0 ? "directo" : "estudio", d0, d1, r1, tremDb);
+        check (q == 0 ? "directo: vibrato xerado (fondo, velocidade, retardo e trémolo)" : "estudio: vibrato xerado (fondo, velocidade, retardo e trémolo)",
+               d0 < 6.0 && d1 > 24.0 && d1 < 38.0 && r1 > 4.8 && r1 < 6.2 && tremDb > 2.5 && tremDb < 5.0);   // trémolo 40 %: 1 ± 0,2 = 3,5 dB
+    }
+
     // consoantes xordas ao transpor ±7: a «s» sae co seu nivel e sen estalos (antes, en
     // Directo baixando, ata 11 dB máis forte e cun estalo de 10 ms na fronteira coa vogal)
     {

@@ -19,6 +19,7 @@ public:
     {
         sr = sampleRate;
         corr.prepare (sr);
+        corr.setVoice (role.harmony ? role.index + 1 : 0);
         decider.prepare (sr);
         decHop = std::max (1, (int) std::lround (0.004 * sr));
         xfade = std::max (16, (int) std::lround (sr * 0.0006));
@@ -146,6 +147,8 @@ public:
                 y[c] = (float) (y[c] + (fixed - y[c]) * ffix.amount);
             }
         }
+        // trémolo do vibrato xerado
+        if (sounding && state.active) for (int c = 0; c < nch; ++c) y[c] = (float) (y[c] * state.ampMod);
         // unha armonía só soa cando hai voz e nota (sen ton, as consoantes dobradas emborranan)
         if (role.harmony)
         {

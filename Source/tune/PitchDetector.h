@@ -125,6 +125,18 @@ private:
             best = -1;
             for (int t = tauMin + 1; t < tauMax - 1; ++t)
                 if (d[(size_t) t] <= d[(size_t) t - 1] && d[(size_t) t] <= d[(size_t) t + 1] && (best < 0 || d[(size_t) t] < d[(size_t) best])) best = t;
+            // co ruído, o val máis fondo adoita ser un múltiplo longo do período (nunha voz
+            // aguda, ata 7 veces): se os múltiplos dun máis curto din outra cousa, vale este
+            if (best > 0 && d[(size_t) best] <= 0.35 && ! (voiced && pt > (tauMax - 2) / 2))
+            {
+                double prom = 0;
+                const int cb = combSearch (prom);
+                if (cb > 0 && prom >= combNew && best > 1.5 * cb)
+                {
+                    const double r = (double) best / cb;
+                    if (std::abs (r - std::round (r)) < 0.06 * std::round (r)) { best = cb; combed = true; }
+                }
+            }
             if (best < 0 || d[(size_t) best] > 0.35)
             {
                 // voz con moito aire ou ruído: ningún val chega, pero o período ten val en

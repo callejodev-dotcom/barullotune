@@ -685,11 +685,13 @@ void ValueSlider::showEditor()
     editor->setBounds (getBounds().withSizeKeepingCentre (juce::jmax (70, getWidth()), 24));
     parent->addAndMakeVisible (*editor);
     editor->grabKeyboardFocus();
-    auto finish = [this] (bool apply)
+    // (o punteiro seguro créase fóra: MSVC le mal o «this» nunha captura dun lambda dentro doutro)
+    const juce::Component::SafePointer<ValueSlider> safe (this);
+    auto finish = [this, safe] (bool apply)
     {
         if (editor == nullptr) return;
         const auto text = editor->getText();
-        juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<ValueSlider> (this), text, apply]
+        juce::MessageManager::callAsync ([sp = safe, text, apply]
         {
             if (sp == nullptr) return;
             if (apply) sp->applyText (text);

@@ -588,7 +588,8 @@ bool TuneProcessor::startPlayback (const juce::File& wav)
     juce::AudioFormatManager fm; fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (wav));
     if (rd == nullptr || rd->lengthInSamples <= 0) return false;
-    const int len = (int) juce::jmin<juce::int64> (rd->lengthInSamples, (juce::int64) (10 * 60 * 48000));
+    // (std::min e non juce::jmin<int64>: con juce_dsp, GCC proba tamén a versión SIMD de long long e non compila)
+    const int len = (int) std::min<juce::int64> (rd->lengthInSamples, (juce::int64) (10 * 60 * 48000));
     juce::AudioBuffer<float> fresh ((int) rd->numChannels, len);
     rd->read (&fresh, 0, len, 0, true, true);
     {

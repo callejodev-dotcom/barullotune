@@ -3,6 +3,7 @@
 // estado gardado e (con --snapshot) unha captura da interface.
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <random>
+#include "Aleatorio.h"
 #include <map>
 #include <cstring>
 #include "PluginProcessor.h"
@@ -50,7 +51,7 @@ static std::vector<float> makeVoice (std::vector<double>& truth)
     const auto notes = melody();
     std::vector<float> x;
     std::mt19937 rng (7);
-    std::normal_distribution<double> g (0, 1);
+    aleatorio::Normal g (0, 1);
     double phase = 0, prevMidi = notes[0].midi + notes[0].cents / 100.0, jit = 0, hp = 0, prev = 0;
     for (const auto& nt : notes)
     {
@@ -305,6 +306,7 @@ static void writeJson (const juce::File& f)
 
 int main (int argc, char** argv)
 {
+    std::setvbuf (stdout, nullptr, _IONBF, 0);   // se casca no CI, que se vexa ata onde chegou
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 3 && juce::String (argv[1]) == "--file") return processFile (argc, argv);
     if (argc > 1 && juce::String (argv[1]) == "--cpu") { cpuBench (20.0); return 0; }
@@ -394,7 +396,7 @@ int main (int argc, char** argv)
         // inseguridade (oscilación irregular, non vibrato): o preset Natural debe corrixila
         {
             std::vector<float> wn ((size_t) (2.4 * SR));
-            std::mt19937 rr (11); std::normal_distribution<double> gn (0, 1);
+            std::mt19937 rr (11); aleatorio::Normal gn (0, 1);
             double ph = 0, w1 = 0, w2 = 0;
             std::vector<double> wob (wn.size());
             for (size_t i = 0; i < wn.size(); ++i)
@@ -438,7 +440,7 @@ int main (int argc, char** argv)
         // quedar plana na nota: así se ve se o ton se mide ben no punto que se le
         {
             std::vector<float> vr ((size_t) (2.4 * SR));
-            std::mt19937 rr (5); std::normal_distribution<double> gn (0, 1);
+            std::mt19937 rr (5); aleatorio::Normal gn (0, 1);
             double ph = 0, jit = 0, shim = 1.0;
             for (size_t i = 0; i < vr.size(); ++i)
             {
@@ -901,7 +903,7 @@ int main (int argc, char** argv)
     // Directo baixando, ata 11 dB máis forte e cun estalo de 10 ms na fronteira coa vogal)
     {
         std::vector<float> fx;
-        std::mt19937 rr (21); std::normal_distribution<double> gn (0, 1);
+        std::mt19937 rr (21); aleatorio::Normal gn (0, 1);
         double ph = 0, hp = 0, pv = 0, z1 = 0, z2 = 0;
         auto vowel = [&] (double dur)
         {
@@ -1196,7 +1198,7 @@ int main (int argc, char** argv)
     // avisar aos oíntes): ao gardar e cargar noutra instancia teñen que chegar todos
     {
         std::mt19937 rr (77);
-        std::uniform_real_distribution<float> u01 (0.0f, 1.0f);
+        aleatorio::Uniforme<float> u01 (0.0f, 1.0f);
         TuneProcessor a;
         for (auto* prm : a.getParameters())
         {
@@ -1304,7 +1306,7 @@ int main (int argc, char** argv)
     for (int q = 0; q < 3; ++q)
     {
         std::vector<float> noise (48000 * 2);
-        std::mt19937 rng (3); std::uniform_real_distribution<float> u (-0.5f, 0.5f);
+        std::mt19937 rng (3); aleatorio::Uniforme<float> u (-0.5f, 0.5f);
         for (size_t i = 24000; i < noise.size(); ++i) noise[i] = u (rng);
         auto y = run (noise, 512, 2, [q] (TuneProcessor& p) { setP (p, "calidade", (float) q); setP (p, "transpor", 7); }, lat);
         float mx = 0; bool finite = true;
@@ -1375,7 +1377,23 @@ int main (int argc, char** argv)
             if (k % 2) for (int j = 0; j < 8 && cut > 0; ++j) static_cast<char*> (junk.getData())[rr() % (unsigned) cut] = (char) rr();
             d.setStateInformation (junk.getData(), (int) junk.getSize());
         }
-        check ("estados rotos: sen problemas", true);
+        // e cortados xusto despois do primeiro byte dunha letra de varios bytes (JUCE escribe
+        // &#...; pero outro programa pode non facelo): o lector de XML de JUCE saltaba o final
+        // do texto e lía fóra (ASan, en Linux)
+        std::string raw = xml->toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()).toStdString();
+        raw.replace (raw.find ("Robot"), 5, "Corrección «suave» ♯");
+        juce::MemoryOutputStream mo;
+        mo.writeInt (0x21324356); mo.writeInt ((int) raw.size()); mo.write (raw.data(), raw.size()); mo.writeByte (0);
+        const juce::MemoryBlock acc = mo.getMemoryBlock();
+        int leads = 0;
+        for (size_t i = 8; i < acc.getSize(); ++i)
+            if ((static_cast<const unsigned char*> (acc.getData())[i] & 0xC0) == 0xC0)
+            {
+                juce::MemoryBlock junk (acc.getData(), i + 1);
+                d.setStateInformation (junk.getData(), (int) junk.getSize());
+                ++leads;
+            }
+        check ("estados rotos: sen problemas", leads >= 4);
     }
 
     // MIDI de saída: a melodía (Do maior) dá as súas 12 notas, na orde
@@ -1522,6 +1540,17 @@ int main (int argc, char** argv)
         const bool bad = ! sc.loadScala (text17, err17);
         std::printf ("Scala: Ptolomeo en Re %s (Fa♯ %+.2f c, Mi %+.2f c); 17-EDO: %s\n", ok1 ? "ben" : "MAL", cs[6], cs[4], err17.toRawUTF8());
         check ("Scala: escala de 7 notas cargada e a de 17 rexeitada", ok1 && bad);
+
+        // texto de fóra: un .scl en Latin-1 (moitos de Windows) cárgase igual, e o UTF-8 cortado
+        // dá un texto válido
+        const char latin1[] = "! ptolemy.scl\n!\nEscala diat\xF3nica de Ptolomeo\n 7\n!\n 9/8\n 5/4\n 4/3\n 3/2\n 5/3\n 15/8\n 2/1\n";
+        const auto tl = TuneProcessor::textFromBytes (latin1, sizeof (latin1) - 1);
+        juce::String errL;
+        const bool okL = sc.loadScala (tl, errL) && sc.effectiveMask() == want && tl.contains (juce::String::fromUTF8 ("diatónica"));
+        const unsigned char cut[] = { 'a', 'b', 0xC3 };   // unha «ó» cortada
+        const auto tc = TuneProcessor::textFromBytes (cut, sizeof (cut));
+        const bool okC = tc.length() == 3 && juce::CharPointer_UTF8::isValidString (tc.toRawUTF8(), (int) tc.getNumBytesAsUTF8());
+        check ("texto de fóra: .scl en Latin-1 e UTF-8 cortado", okL && okC);
     }
 
     // automatización ao chou: todos os parámetros, bloques de 1 a 1024 mostras, MIDI, cambios
@@ -1529,7 +1558,7 @@ int main (int argc, char** argv)
     // e impulsos. Nada pode saír non finito nin disparado.
     {
         std::mt19937 rr (1234);
-        std::uniform_real_distribution<float> u01 (0.0f, 1.0f), u11 (-1.0f, 1.0f);
+        aleatorio::Uniforme<float> u01 (0.0f, 1.0f), u11 (-1.0f, 1.0f);
         TuneProcessor p;
         double sr = SR;
         p.setPlayConfigDetails (2, 2, sr, 1024);

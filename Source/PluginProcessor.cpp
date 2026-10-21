@@ -536,7 +536,7 @@ bool TuneProcessor::saveUserPreset (const juce::String& name)
 
 bool TuneProcessor::loadUserPreset (const juce::File& file)
 {
-    auto xml = juce::XmlDocument::parse (file);
+    auto xml = juce::parseXML (readTextFile (file));
     if (xml == nullptr || ! xml->hasTagName ("PARAMS")) return false;
     applyParams (juce::ValueTree::fromXml (*xml));
     return true;
@@ -1006,9 +1006,56 @@ void TuneProcessor::migrateState (juce::ValueTree& st, int fromVersion)
     }
 }
 
+// UTF-8 estrito: sen secuencias cortadas, longas de máis nin substitutos
+static bool validUtf8 (const unsigned char* p, size_t n)
+{
+    for (size_t i = 0; i < n;)
+    {
+        const unsigned b = p[i];
+        if (b < 0x80) { ++i; continue; }
+        const size_t extra = b >= 0xC2 && b <= 0xDF ? 1 : b >= 0xE0 && b <= 0xEF ? 2 : b >= 0xF0 && b <= 0xF4 ? 3 : 0;
+        if (extra == 0 || n - i <= extra) return false;   // descoñecido ou cortado ao final
+        for (size_t k = 1; k <= extra; ++k) if ((p[i + k] & 0xC0) != 0x80) return false;
+        const unsigned c1 = p[i + 1];
+        if ((b == 0xE0 && c1 < 0xA0) || (b == 0xED && c1 >= 0xA0) || (b == 0xF0 && c1 < 0x90) || (b == 0xF4 && c1 >= 0x90)) return false;
+        i += extra + 1;
+    }
+    return true;
+}
+
+juce::String TuneProcessor::textFromBytes (const void* data, size_t size)
+{
+    auto* p = static_cast<const unsigned char*> (data);
+    if (p == nullptr || size == 0) return {};
+    if (size >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF) { p += 3; size -= 3; }   // BOM
+    size_t n = 0;
+    while (n < size && p[n] != 0) ++n;   // o texto remata no primeiro cero
+    if (validUtf8 (p, n)) return juce::String::fromUTF8 (reinterpret_cast<const char*> (p), (int) n);
+    juce::String s;
+    s.preallocateBytes (n * 2);
+    for (size_t i = 0; i < n; ++i) s += (juce::juce_wchar) p[i];
+    return s;
+}
+
+juce::String TuneProcessor::readTextFile (const juce::File& file)
+{
+    // un preset ou unha escala son pequenos: algo de máis de 4 MB non é noso
+    if (! file.existsAsFile() || file.getSize() > 4 * 1024 * 1024) return {};
+    juce::MemoryBlock mb;
+    if (! file.loadFileAsData (mb)) return {};
+    return textFromBytes (mb.getData(), mb.getSize());
+}
+
 void TuneProcessor::setStateInformation (const void* data, int size)
 {
-    auto xml = getXmlFromBinary (data, size);
+    // o formato de copyXmlToBinary (número máxico, lonxitude e o texto), lido sen fiarse:
+    // getXmlFromBinary pasa os bytes tal cal ao lector de XML
+    std::unique_ptr<juce::XmlElement> xml;
+    if (data != nullptr && size > 8 && juce::ByteOrder::littleEndianInt (data) == 0x21324356)
+    {
+        const auto len = (int) juce::ByteOrder::littleEndianInt (juce::addBytesToPointer (data, 4));
+        if (len > 0) xml = juce::parseXML (textFromBytes (juce::addBytesToPointer (data, 8), (size_t) juce::jmin (size - 8, len)));
+    }
     if (xml == nullptr || ! xml->hasTagName (params.state.getType())) return;
     auto st = juce::ValueTree::fromXml (*xml);
     const int from = (int) st.getProperty ("version", 0);

@@ -1168,7 +1168,7 @@ void TuneEditor::importScala()
         if (! f.existsAsFile()) return;
         juce::String err;
         proc.undo.beginNewTransaction();
-        if (! proc.loadScala (f.loadFileAsString(), err))
+        if (! proc.loadScala (TuneProcessor::readTextFile (f), err))
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Scala", err);
         refresh();
     });

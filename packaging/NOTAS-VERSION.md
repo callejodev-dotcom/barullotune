@@ -12,7 +12,8 @@ Unha ferramenta de [Escoita](https://www.escoita.link). Manual: [docs/MANUAL.md]
 - **Presets propios**, **A/B**, **desfacer**, bypass sen desprazar o son e formato **CLAP**.
 - **Interface nova** por pestanas, que se pode manexar co teclado e cos lectores de pantalla.
 - **Informe**: como afinas ti, nota a nota. Na app, **gravar** e **escoitarse** en bucle.
-- **Motor máis fino**: a nota cambia onde cambia a voz (nos glisandos rápidos quedaba atrás). O detector aguanta segundos harmónicos fortes, ruído e voz aireada sen saltar de oitava. As consoantes xa non estalan ao transpor e cambiar de xeito non dá golpe.
+- **Motor máis fino**: a nota cambia onde cambia a voz (nos glisandos rápidos quedaba atrás). O detector aguanta segundos harmónicos fortes, ruído e voz aireada sen saltar de oitava. As consoantes xa non estalan ao transpor e cambiar de xeito non dá golpe. En Directo, unha voz con vibrato e tremor xa non salta un intre á nota do lado.
+- **Máis seguro**: un estado do DAW, un preset ou un .scl estragados xa non poden tirar o programa, e os .scl en Latin-1 (moitos de Windows) cárganse ben.
 
 ## Descargas
 

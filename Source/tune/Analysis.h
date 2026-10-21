@@ -233,11 +233,12 @@ public:
         if (slUseFit) slBase = a;
     }
 
-    bool pitchAtSliding (double p, double& m) const
+    // maxAhead: canto se estira a tendencia por diante da última medida (en períodos)
+    bool pitchAtSliding (double p, double& m, double maxAhead = 4.0) const
     {
         if (slN == 0) return false;
         const SlEntry& last = slAt (slN - 1);
-        if (p >= last.c) { const double h = std::min (p - last.c, 4.0 * slTau); m = slBase + slSlope * h + slQuad * h * h; return true; }
+        if (p >= last.c) { const double h = std::min (p - last.c, maxAhead * slTau); m = slBase + slSlope * h + slQuad * h * h; return true; }
         const SlEntry& first = slAt (0);
         if (p < first.c) { if (p < first.c - 2.0 * slTau) return false; m = first.m; return true; }
         int lo = 0, hi = slN - 1;   // slAt(lo).c <= p < slAt(hi).c

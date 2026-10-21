@@ -17,6 +17,7 @@
 #include <cstring>
 #include <map>
 #include <random>
+#include "Aleatorio.h"
 #include <string>
 
 namespace {
@@ -54,7 +55,7 @@ Signal synth (const Case& cs, uint32_t seed)
 {
     Signal s;
     std::mt19937 rng (seed);
-    std::normal_distribution<double> g (0, 1);
+    aleatorio::Normal g (0, 1);
     double ph = 0, jit = 0;
     for (const auto& nt : cs.notes)
     {
@@ -197,6 +198,7 @@ Res evaluate (const Case& cs, const Signal& s)
 
 int main (int argc, char** argv)
 {
+    std::setvbuf (stdout, nullptr, _IONBF, 0);
     std::string json;
     for (int a = 1; a + 1 < argc; ++a) if (std::strcmp (argv[a], "--json") == 0) json = argv[a + 1];
 

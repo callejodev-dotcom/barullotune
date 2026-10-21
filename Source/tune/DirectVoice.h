@@ -75,12 +75,15 @@ public:
                 mNow = an.cycleM + an.cycleSlope * clampd (rp - an.cycleT, 0.0, 4.0 * an.curP);   // aínda non: extrapólase
         }
         // a nota de destino decídese co ton do punto que se le (sen o atraso do detector);
-        // en Preciso, co de 6 ms máis adiante (xa se coñece): así cambia xusto onde cambia a voz
+        // en Preciso, co de 6 ms máis adiante (xa se coñece): así cambia xusto onde cambia a voz.
+        // A tendencia estírase como moito un cuarto de período por diante da última medida:
+        // estirada catro, unha voz con tremor de ciclo a ciclo (0,6 %, o normal) daba saltos
+        // de ±0,4 semitonos en poucos ms e o destino ía á nota do lado
         int target = an.target;
         if (voiced && target >= 0)
         {
-            double mDec = mNow;
-            if (precise) { double mi = 0; if (an.pitchAtSliding (rp + 0.5 * ((double) an.n - rp), mi)) mDec = mi; }
+            double mDec = mNow, mi = 0;
+            if (an.pitchAtSliding (precise ? rp + 0.5 * ((double) an.n - rp) : rp + rho * lookAhead, mi, 0.25)) mDec = mi;
             if (! decider.active) { decider.update (mDec, 0.0); decCount = 0; }
             else if (++decCount >= decHop) { decider.update (mDec, (double) decCount); decCount = 0; }
             target = decider.target;

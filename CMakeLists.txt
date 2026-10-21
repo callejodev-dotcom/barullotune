@@ -141,6 +141,9 @@ if(BARULLO_TESTS)
   target_link_libraries(BTRenderTest PRIVATE ${CMAKE_DL_LIBS})
   if(MSVC)
     target_compile_options(BTRenderTest PRIVATE /utf-8 /bigobj)
+    # o main da proba ten ducias de procesadores na pila e MSVC non reutiliza o oco
+    # entre bloques: coa pila de 1 MB de Windows, cascaba antes de escribir nada
+    target_link_options(BTRenderTest PRIVATE /STACK:16777216)
   endif()
   target_compile_definitions(BTRenderTest PRIVATE BARULLO_VERSION="${PROJECT_VERSION}" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BARULLO_NO_PLUGIN_ENTRY=1)
   target_link_libraries(BTRenderTest PRIVATE BTFonts juce::juce_audio_utils juce::juce_audio_processors juce::juce_audio_formats juce::juce_dsp

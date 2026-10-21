@@ -358,8 +358,10 @@ public:
         buildSinc();
         ffix.prepare (sr);
         ffixAlpha = 1.0 - std::exp (-1.0 / (0.02 * sr));
-        dirAlpha = 1.0 - std::exp (-1.0 / (0.0015 * sr));
-        lookAhead = 0.0015 * sr;   // o atraso dese suavizado
+        // suavizado da corrección: 0,4 ms (con 1,5 ms erraba un 10 % máis nas voces reais e
+        // non soaba máis limpo); o ton mírase ese anaco por diante para compensar o atraso
+        dirAlpha = 1.0 - std::exp (-1.0 / (0.0004 * sr));
+        lookAhead = 0.0004 * sr;
         configure (quality, range);
     }
 
@@ -754,24 +756,54 @@ private:
         if (slN > 0 && e.c <= slAt (slN - 1).c) return;
         slH[(slFirst + slN) % slMax] = e;
         if (slN < slMax) ++slN; else slFirst = (slFirst + 1) % slMax;
-        // pendente: recta polas medidas do último período
-        double tm = 0, mm = 0; int cnt = 0;
-        for (int k = slN - 1; k >= 0 && slAt (k).c > e.c - tau; --k) { tm += slAt (k).c; mm += slAt (k).m; ++cnt; }
-        slSlope = 0;
-        if (cnt >= 3)
+        // tendencia: recta (ou parábola) polas medidas do último anaco, ancorada na última
+        slFit (e.c, tau);
+    }
+
+    double slWin = 0.75, slMaxSlope = 90.0; int slDeg = 1, slUseFit = 0;   // (axustados con voces reais: tendencia dos últimos 3/4 de período, ata 90 semitonos/s)
+    double slBase = 0, slQuad = 0;
+    void slFit (double cLast, double tau)
+    {
+        slSlope = 0; slQuad = 0; slBase = slAt (slN - 1).m;
+        int cnt = 0;
+        for (int k = slN - 1; k >= 0 && slAt (k).c > cLast - slWin * tau; --k) ++cnt;
+        if (cnt < 3) return;
+        // mínimos cadrados en h = c − cLast (en períodos, para que os números sexan cómodos)
+        double S[5] = {}, T[3] = {};
+        for (int k = slN - cnt; k < slN; ++k)
         {
-            tm /= cnt; mm /= cnt;
-            double num = 0, dd = 0;
-            for (int k = slN - 1; k >= slN - cnt; --k) { const double dt = slAt (k).c - tm; num += dt * (slAt (k).m - mm); dd += dt * dt; }
-            if (dd > 0) slSlope = clampd (num / dd, -25.0 / sr, 25.0 / sr);
+            const double h = (slAt (k).c - cLast) / tau, m = slAt (k).m;
+            double hp = 1;
+            for (int j = 0; j < 5; ++j) { S[j] += hp; if (j < 3) T[j] += hp * m; hp *= h; }
         }
+        double a = 0, b = 0, q = 0;
+        if (slDeg == 2 && cnt >= 5)
+        {
+            // [S0 S1 S2; S1 S2 S3; S2 S3 S4] [a b q] = [T0 T1 T2]
+            const double A[3][3] = { { S[0], S[1], S[2] }, { S[1], S[2], S[3] }, { S[2], S[3], S[4] } };
+            const double det = A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+            if (std::abs (det) < 1e-12) return;
+            auto d3 = [&] (int col) { double M[3][3]; for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) M[i][j] = j == col ? T[i] : A[i][j];
+                                      return M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]); };
+            a = d3 (0) / det; b = d3 (1) / det; q = d3 (2) / det;
+        }
+        else
+        {
+            const double den = S[0] * S[2] - S[1] * S[1];
+            if (std::abs (den) < 1e-12) return;
+            a = (T[0] * S[2] - S[1] * T[1]) / den; b = (S[0] * T[1] - S[1] * T[0]) / den;
+        }
+        const double maxS = slMaxSlope / sr * tau;   // semitonos por período
+        slSlope = clampd (b, -maxS, maxS) / tau;
+        slQuad = q / (tau * tau);
+        if (slUseFit) slBase = a;
     }
 
     bool pitchAtSliding (double p, double& m) const
     {
         if (slN == 0) return false;
         const SlEntry& last = slAt (slN - 1);
-        if (p >= last.c) { m = last.m + slSlope * std::min (p - last.c, 4.0 * slTau); return true; }
+        if (p >= last.c) { const double h = std::min (p - last.c, 4.0 * slTau); m = slBase + slSlope * h + slQuad * h * h; return true; }
         const SlEntry& first = slAt (0);
         if (p < first.c) { if (p < first.c - 2.0 * slTau) return false; m = first.m; return true; }
         int lo = 0, hi = slN - 1;   // slAt(lo).c <= p < slAt(hi).c
@@ -820,8 +852,8 @@ private:
         if (voiced)
         {
             double mi = 0;
-            // o suavizado da corrección (1,5 ms) atrasaría a corrección: o ton mírase ese
-            // anaco por diante do punto de lectura, así a corrección chega a tempo
+            // o suavizado da corrección atrasaríaa: o ton mírase ese anaco por diante do
+            // punto de lectura, así a corrección chega a tempo
             if (pitchAtSliding (rp + rho * lookAhead, mi)) mNow = mi;   // o ton medido á par da lectura
             else if (pitchAtFromMarks (rp, mi)) mNow = mi;            // xa medido: o ton dos ciclos onde se le
             else if (cycleOk)
@@ -831,7 +863,7 @@ private:
         if (voiced && target >= 0) { double om; raw = correctionStep (directState, mNow, target, 1.0, om); }
         else directState.active = false;
         if (starting) dirCorr = raw;
-        else dirCorr += (raw - dirCorr) * dirAlpha;   // 1,5 ms de suavizado, para que non rasque
+        else dirCorr += (raw - dirCorr) * dirAlpha;   // 0,4 ms de suavizado
         rho = std::pow (2.0, dirCorr / 12.0);
         correctionCents = voiced ? (dirCorr - transpose) * 100.0 : 0.0;
         if (voiced) outputMidi = mNow + dirCorr;

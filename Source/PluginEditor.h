@@ -151,6 +151,13 @@ private:
         std::function<void (juce::Graphics&)> painter;
         void paint (juce::Graphics& g) override { if (painter) painter (g); }
     };
+    // gravar (un círculo) e escoitar en bucle (un triángulo), na app independente
+    struct TransportButton : juce::Button
+    {
+        TransportButton (bool rec) : juce::Button (rec ? "gravar" : "escoitar"), isRecord (rec) {}
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+        bool isRecord;
+    };
     // botón de desfacer / refacer (unha frecha en arco)
     struct ArrowButton : juce::Button
     {
@@ -184,6 +191,8 @@ private:
     juce::ComboBox preset;
     juce::TextButton abBtn[2], compare;
     ArrowButton undoBtn { false }, redoBtn { true };
+    TransportButton recBtn { true }, playBtn { false };
+    bool standaloneUi() const;
     juce::TextButton calBtn[3];
     // pestanas
     juce::TextButton tabBtn[numTabs];

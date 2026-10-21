@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <array>
 #include <atomic>
 #include "tune/Engine.h"
@@ -207,6 +208,18 @@ public:
     Practice practice() const;
     void resetPractice() { practiceReset = true; }
 
+    // gravar e escoitarse (pensado para a aplicación independente; nun DAW, grava o DAW).
+    // Gravar: a saída vai a un WAV (nun fío aparte). Escoitar: a última toma soa en bucle
+    // mesturada na saída.
+    bool startRecording (const juce::File& wav);
+    void stopRecording();
+    bool isRecording() const { return recording.load(); }
+    juce::File lastTake() const { return lastTakeFile; }
+    bool startPlayback (const juce::File& wav);   // en bucle ata stopPlayback
+    void stopPlayback() { playing = false; }
+    bool isPlaying() const { return playing.load(); }
+    static juce::File takesFolder();
+
     // latencia actual en ms (para amosala)
     float latencyMs() const { return (float) (1000.0 * latencyNow.load() / juce::jmax (1.0, getSampleRate())); }
 
@@ -256,6 +269,17 @@ private:
     std::atomic<bool> keyListening { false };
     std::atomic<float> keyHeard { 0 };
     std::array<std::atomic<float>, 12> keyHist {};
+    // gravación e escoita
+    juce::TimeSliceThread writerThread { "Barullo Tune: gravar" };
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> threadedWriter;
+    // o fío de audio só _intenta_ coller isto (nunca agarda); a interface cólleo para
+    // cambiar o escritor ou a toma, así nunca se destrúen mentres se usan
+    juce::SpinLock recLock;
+    std::atomic<bool> recording { false }, playing { false };
+    juce::File lastTakeFile;
+    juce::AudioBuffer<float> take;   // a toma que se escoita (cárgase fóra do fío de audio)
+    std::atomic<int> takeLength { 0 };
+    int takePos = 0;
     // práctica (escribe o fío de audio en pushFrame; le a interface)
     std::atomic<bool> practiceReset { false };
     std::atomic<float> prSeconds { 0 }, prWithin10 { 0 }, prWithin25 { 0 }, prSumAbs { 0 }, prSum { 0 };

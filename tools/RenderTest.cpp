@@ -1076,6 +1076,50 @@ int main (int argc, char** argv)
         check ("tonalidade co acompañamento na entrada lateral: Re maior", layoutOk && done && p.effectiveMask() == dMajor);
     }
 
+    // gravar e escoitarse: o WAV gravado é a saída (mesmo nivel), e escoitar a toma súmaa á
+    // saída en bucle
+    {
+        const auto wav = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("barullo_toma_proba.wav");
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        major (p);
+        p.prepareToPlay (SR, 512);
+        const bool started = p.startRecording (wav);
+        juce::AudioBuffer<float> buf (2, 512);
+        double eOut = 0; const int blocks = (int) (SR * 2.0 / 512);
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) (b * 512 + i)]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            for (int i = 0; i < 512; ++i) eOut += (double) buf.getSample (0, i) * buf.getSample (0, i);
+        }
+        p.stopRecording();
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (wav));
+        double eFile = 0; juce::int64 len = 0;
+        if (rd != nullptr)
+        {
+            len = rd->lengthInSamples;
+            juce::AudioBuffer<float> fb ((int) rd->numChannels, (int) len);
+            rd->read (&fb, 0, (int) len, 0, true, true);
+            for (int i = 0; i < (int) len; ++i) eFile += (double) fb.getSample (0, i) * fb.getSample (0, i);
+        }
+        const double ratioDb = 10 * std::log10 (eFile / std::max (1e-20, eOut));
+        // escoitar: con silencio na entrada, sae a toma
+        const bool playOk = p.startPlayback (wav);
+        double ePlay = 0;
+        for (int b = 0; b < 20; ++b)
+        {
+            buf.clear();
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            for (int i = 0; i < 512; ++i) ePlay += (double) buf.getSample (0, i) * buf.getSample (0, i);
+        }
+        p.stopPlayback();
+        wav.deleteFile();
+        std::printf ("gravar: %d mostras (agardadas %d), nivel %+.2f dB; escoitar: %s\n", (int) len, blocks * 512, ratioDb, ePlay > 0 ? "soa" : "non soa");
+        check ("gravar e escoitarse", started && len == blocks * 512 && std::abs (ratioDb) < 0.1 && playOk && ePlay > 0);
+    }
+
     // práctica: a melodía de proba vai desafinada de propósito (Re −38/−42, Mi +28/+33,
     // La +40…): o informe ten que dicilo, nota a nota
     {

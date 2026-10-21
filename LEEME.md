@@ -43,6 +43,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Efecto robot**: velocidade e transición a 0 e vibrato a 0 % (ou o preset «Robot»).
 - **Presets**: Natural, Suave (con flexibilidade e humanizar), Pop, Balada (humanizada), Robot, Trap, Directo seguro, Xigante e Trasno. Só cambian o carácter da corrección, non a tonalidade nin a voz; tamén aparecen no menú de presets do DAW.
 - **Comparar**: escoita a voz sen afinar, aliñada no tempo.
+- **Gravar e escoitarse** (na aplicación independente): a saída a un WAV en Música/Barullo Tune, e a última toma en bucle.
 - **Informe** (na pantalla): como afinas ti, coa voz que entra antes de corrixila: o tempo cantado, canto del a menos de 10 e de 25 cents, a desviación media, se tendes a ir alta ou baixa, e unha barra por nota. Para practicar, tamén na aplicación independente.
 - **Estéreo de verdade**: o ton detéctase no centro e as dúas canles corríxense igual (a imaxe estéreo non se move).
 - **Xanela** de 75 % a 150 % (arrastrando a esquina); o tamaño gárdase co proxecto.

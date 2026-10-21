@@ -357,6 +357,7 @@ void TuneProcessor::harmGains (int h, float& gl, float& gr) const
 
 TuneProcessor::~TuneProcessor()
 {
+    stopRecording();
     cancelPendingUpdate();
     if (mts != nullptr) MTS_DeregisterClient (mts);
 }
@@ -538,6 +539,65 @@ bool TuneProcessor::loadUserPreset (const juce::File& file)
     auto xml = juce::XmlDocument::parse (file);
     if (xml == nullptr || ! xml->hasTagName ("PARAMS")) return false;
     applyParams (juce::ValueTree::fromXml (*xml));
+    return true;
+}
+
+// ---- gravar e escoitarse
+juce::File TuneProcessor::takesFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Barullo Tune");
+}
+
+bool TuneProcessor::startRecording (const juce::File& wav)
+{
+    stopRecording();
+    if (! wav.getParentDirectory().createDirectory()) return false;
+    wav.deleteFile();
+    auto stream = wav.createOutputStream();
+    if (stream == nullptr) return false;
+    juce::WavAudioFormat fmt;
+    const int ch = juce::jmax (1, getMainBusNumOutputChannels());
+    std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (stream.get(), getSampleRate() > 0 ? getSampleRate() : 48000.0, (unsigned) ch, 24, {}, 0));
+    if (w == nullptr) return false;
+    stream.release();
+    writerThread.startThread();
+    auto tw = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (w.release(), writerThread, 1 << 17);
+    {
+        const juce::SpinLock::ScopedLockType sl (recLock);
+        threadedWriter = std::move (tw);
+    }
+    lastTakeFile = wav;
+    recording = true;
+    return true;
+}
+
+void TuneProcessor::stopRecording()
+{
+    recording = false;
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> old;
+    {
+        const juce::SpinLock::ScopedLockType sl (recLock);
+        old = std::move (threadedWriter);
+    }
+    old.reset();   // fóra do bloqueo: baleira o que quede e pecha o ficheiro
+}
+
+bool TuneProcessor::startPlayback (const juce::File& wav)
+{
+    stopPlayback();
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (wav));
+    if (rd == nullptr || rd->lengthInSamples <= 0) return false;
+    const int len = (int) juce::jmin<juce::int64> (rd->lengthInSamples, (juce::int64) (10 * 60 * 48000));
+    juce::AudioBuffer<float> fresh ((int) rd->numChannels, len);
+    rd->read (&fresh, 0, len, 0, true, true);
+    {
+        const juce::SpinLock::ScopedLockType sl (recLock);
+        std::swap (take, fresh);   // (a vella libérase fóra do bloqueo)
+        takePos = 0;
+        takeLength = len;
+    }
+    playing = true;
     return true;
 }
 
@@ -884,6 +944,26 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         else if (m.isNoteOff()) engine.noteOff (m.getNoteNumber());
         else if (m.isPitchWheel()) engine.setPitchBend (m.getPitchWheelValue(), m.getChannel());
     }
+    // escoitar a toma (en bucle) e gravar a saída
+    if (playing.load() || recording.load())
+    {
+        const juce::SpinLock::ScopedTryLockType tl (recLock);
+        if (tl.isLocked())
+        {
+            if (playing.load() && takeLength.load() > 0 && take.getNumChannels() > 0)
+            {
+                const int len = takeLength.load(), tch = take.getNumChannels();
+                for (int i = 0; i < n; ++i)
+                {
+                    for (int c = 0; c < numCh; ++c) buffer.getWritePointer (c)[i] += take.getSample (juce::jmin (c, tch - 1), takePos);
+                    if (++takePos >= len) takePos = 0;
+                }
+            }
+            if (recording.load() && threadedWriter != nullptr)
+                threadedWriter->write (buffer.getArrayOfReadPointers(), n);   // (se o disco non dá, pérdese un anaco: o audio non agarda)
+        }
+    }
+
     // MIDI de saída: as notas cantadas substitúen o que entrou
     if (midiOutOn) midi.swapWith (midiOutBuf);
     else if (midiOutNote >= 0) { midi.addEvent (juce::MidiMessage::noteOff (1, midiOutNote), 0); midiOutNote = -1; }

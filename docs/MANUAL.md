@@ -119,6 +119,8 @@ Pulsa **Informe** na pantalla e canta: verás como afinas ti, coa voz que entra 
 
 **Empezar de novo** ponse a cero. Na aplicación independente, é unha boa maneira de practicar escalas e cancións.
 
+Na aplicación independente tes tamén, na cabeceira, **gravar** (o círculo) e **escoitar** (o triángulo). Gravar garda a saída nun WAV, en Música/Barullo Tune. Escoitar fai soar a última toma en bucle, para cantar enriba ou escoitarte.
+
 ## Receitas
 
 - **Voz pop limpa, sen que se note**: preset Natural ou Pop, en Preciso ou Estudio. Sobe a **tolerancia** uns 5–10 cents se queres deixar a voz máis viva.

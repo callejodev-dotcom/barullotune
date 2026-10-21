@@ -760,6 +760,25 @@ void TuneEditor::ArrowButton::paintButton (juce::Graphics& g, bool over, bool do
     g.fillPath (head);
 }
 
+void TuneEditor::TransportButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    using namespace ui;
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const bool on = getToggleState();
+    g.setColour (on ? col::sodio : (over || down ? col::carril.brighter (0.15f) : col::fondo2)); g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (hasKeyboardFocus (false) ? col::sodio : col::lina); g.drawRoundedRectangle (r, 5.0f, 1.0f);
+    const auto c = r.getCentre();
+    g.setColour (on ? col::noite : (isEnabled() ? col::escuma : col::neboa.withAlpha (0.4f)));
+    if (isRecord) g.fillEllipse (c.x - 5.5f, c.y - 5.5f, 11.0f, 11.0f);
+    else if (on) { g.fillRect (c.x - 5.0f, c.y - 5.0f, 3.5f, 10.0f); g.fillRect (c.x + 1.5f, c.y - 5.0f, 3.5f, 10.0f); }   // parar
+    else { juce::Path t; t.addTriangle (c.x - 4.0f, c.y - 6.0f, c.x - 4.0f, c.y + 6.0f, c.x + 6.0f, c.y); g.fillPath (t); }
+}
+
+bool TuneEditor::standaloneUi() const
+{
+    return proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone || std::getenv ("BT_STANDALONE") != nullptr;
+}
+
 TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
 {
     using namespace ui;
@@ -811,6 +830,27 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     redoBtn.onClick = [this] { proc.undo.redo(); refresh(); };
     canvas.addAndMakeVisible (undoBtn);
     canvas.addAndMakeVisible (redoBtn);
+    // gravar e escoitarse: só na aplicación independente (nun DAW grava o DAW)
+    recBtn.setTitle (T ("Gravar")); playBtn.setTitle (T ("Escoitar"));
+    recBtn.setTooltip (T ("Gravar a saída nun WAV (en Música/Barullo Tune). Volve pulsar para parar."));
+    playBtn.setTooltip (T ("Escoitar a última toma en bucle. Volve pulsar para parar."));
+    recBtn.onClick = [this]
+    {
+        if (proc.isRecording()) proc.stopRecording();
+        else
+        {
+            proc.stopPlayback();
+            proc.startRecording (TuneProcessor::takesFolder().getChildFile ("toma-" + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S") + ".wav"));
+        }
+        refresh();
+    };
+    playBtn.onClick = [this]
+    {
+        if (proc.isPlaying()) proc.stopPlayback();
+        else if (proc.lastTake().existsAsFile()) { proc.stopRecording(); proc.startPlayback (proc.lastTake()); }
+        refresh();
+    };
+    if (standaloneUi()) { canvas.addAndMakeVisible (recBtn); canvas.addAndMakeVisible (playBtn); }
 
     const char* cals[3] = { "Directo", "Preciso", "Estudio" };
     const char* calTips[3] = {
@@ -993,6 +1033,10 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
 
 TuneEditor::~TuneEditor()
 {
+    // primeiro os enlaces cos parámetros, antes ca os controis que enlazan (se non, ao
+    // destruírse, un enlace quitaríase dun botón xa destruído: «Notas MIDI» vai declarado despois)
+    buttonAtts.clear(); comboAtts.clear(); sliderAtts.clear();
+    tonicaAtt.reset(); escalaAtt.reset(); vozAtt.reset(); afinAtt.reset();
     juce::Desktop::getInstance().removeGlobalMouseListener (this);
     stopTimer();
     setLookAndFeel (nullptr);
@@ -1158,6 +1202,9 @@ void TuneEditor::refresh()
     for (int i = 0; i < 2; ++i) abBtn[i].setToggleState (i == proc.abCurrent(), juce::dontSendNotification);
     undoBtn.setEnabled (proc.undo.canUndo());
     redoBtn.setEnabled (proc.undo.canRedo());
+    recBtn.setToggleState (proc.isRecording(), juce::dontSendNotification);
+    playBtn.setToggleState (proc.isPlaying(), juce::dontSendNotification);
+    playBtn.setEnabled (proc.isPlaying() || proc.lastTake().existsAsFile());
     if (preset.getSelectedId() > 0 && preset.getSelectedId() <= proc.getNumPrograms() && preset.getSelectedId() != proc.getCurrentProgram() + 1)
         preset.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
     // armonías apagadas: a súa fila máis apagada
@@ -1291,6 +1338,8 @@ void TuneEditor::layout()
     compare.setBounds (534, 24, 104, 34);
     undoBtn.setBounds (646, 24, 34, 34);
     redoBtn.setBounds (684, 24, 34, 34);
+    recBtn.setBounds (726, 24, 28, 34);
+    playBtn.setBounds (756, 24, 28, 34);
     for (int i = 0; i < 3; ++i) calBtn[i].setBounds (790 + i * 74 - (i > 0 ? 1 : 0), 24, 74 + (i > 0 ? 1 : 0), 34);
 
     display.setBounds (28, 84, 984, 240);

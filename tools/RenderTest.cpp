@@ -304,12 +304,82 @@ int main (int argc, char** argv)
         std::printf ("natural: entrada %.1f c -> saída %.1f c (máx %.1f c)\n", s.inC, s.outC, s.maxC);
         check ("natural: corrixe (menos da metade da desafinación)", s.outC < 0.5 * s.inC);
 
-        // vibrato 100 % con velocidade 0: as notas centradas e o vibrato intacto
+        // vibrato de verdade: unha nota longa (2,4 s) 25 cents baixa cun vibrato regular de
+        // 5,5 Hz e ±30 cents. Con vibrato 100 %: centrada na nota e co vibrato enteiro;
+        // con vibrato 0 %: plana.
         {
-            auto vb = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 100); }, lat);
-            auto sv = evaluate (vb, lat, truth, 0);
-            std::printf ("vibrato: saída %.1f c de media (con vibrato), centro %+.1f c\n", sv.outC, sv.signedC);
-            check ("vibrato 100 %: conserva o vibrato e centra a nota", sv.outC > 4.0 && std::abs (sv.signedC) < 3.0);
+            std::vector<float> vn ((size_t) (2.4 * SR));
+            double ph = 0;
+            for (size_t i = 0; i < vn.size(); ++i)
+            {
+                const double tt = (double) i / SR;
+                const double mm = 63.75 + 0.30 * std::sin (2 * juce::MathConstants<double>::pi * 5.5 * tt);
+                const double f0 = 440.0 * std::pow (2.0, (mm - 69) / 12.0);
+                ph += f0 / SR;
+                double sm = 0;
+                for (int h = 1; h <= 30; ++h) sm += envAt (VA, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                vn[i] = (float) (0.1 * sm * std::min (1.0, tt / 0.03));
+            }
+            auto stats = [&] (const juce::AudioBuffer<float>& y, int l, double& centre, double& depth)
+            {
+                std::vector<double> ms;
+                for (int64_t c = (int64_t) (0.6 * SR); c < (int64_t) (2.2 * SR); c += 240)
+                {
+                    const double mo = measure (y.getReadPointer (0), y.getNumSamples(), c + l);
+                    if (mo > 0) ms.push_back (mo);
+                }
+                double mean = 0; for (double v : ms) mean += v; mean /= (double) std::max<size_t> (1, ms.size());
+                double var = 0; for (double v : ms) var += (v - mean) * (v - mean); var /= (double) std::max<size_t> (1, ms.size());
+                centre = (mean - 64.0) * 100.0; depth = std::sqrt (var) * 100.0 * std::sqrt (2.0);   // amplitude do seno
+            };
+            int l1 = 0, l2 = 0;
+            auto v100 = run (vn, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 100); }, l1);
+            auto v0 = run (vn, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, l2);
+            double c1, d1, c0, d0;
+            stats (v100, l1, c1, d1); stats (v0, l2, c0, d0);
+            std::printf ("vibrato: entrada 25 c baixa e ±30 c | vibrato 100 %%: centro %+.1f c, ±%.1f c | vibrato 0 %%: centro %+.1f c, ±%.1f c\n", c1, d1, c0, d0);
+            check ("vibrato 100 %: enteiro e centrado; 0 %: plano", std::abs (c1) < 4.0 && d1 > 22.0 && d1 < 38.0 && std::abs (c0) < 4.0 && d0 < 6.0);
+        }
+
+        // inseguridade (oscilación irregular, non vibrato): o preset Natural debe corrixila
+        {
+            std::vector<float> wn ((size_t) (2.4 * SR));
+            std::mt19937 rr (11); std::normal_distribution<double> gn (0, 1);
+            double ph = 0, w1 = 0, w2 = 0;
+            std::vector<double> wob (wn.size());
+            for (size_t i = 0; i < wn.size(); ++i)
+            {
+                // ruído filtrado (1–8 Hz aprox.): oscilación sen período fixo
+                w1 += (gn (rr) - w1) * (2 * juce::MathConstants<double>::pi * 8.0 / SR) * 3.0;
+                w2 += (w1 - w2) * (2 * juce::MathConstants<double>::pi * 2.0 / SR);
+                wob[i] = w1 - w2;
+            }
+            double sd = 0; for (double v : wob) sd += v * v; sd = std::sqrt (sd / (double) wob.size());
+            for (size_t i = 0; i < wn.size(); ++i)
+            {
+                const double tt = (double) i / SR;
+                const double mm = 64.2 + 0.25 * wob[i] / sd;
+                const double f0 = 440.0 * std::pow (2.0, (mm - 69) / 12.0);
+                ph += f0 / SR;
+                double sm = 0;
+                for (int h = 1; h <= 30; ++h) sm += envAt (VA, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                wn[i] = (float) (0.1 * sm * std::min (1.0, tt / 0.03));
+            }
+            auto spread = [&] (const float* y, int len, int l)
+            {
+                double acc = 0; int cnt = 0;
+                for (int64_t c = (int64_t) (0.6 * SR); c < (int64_t) (2.2 * SR); c += 240)
+                {
+                    const double mo = measure (y, len, c + l);
+                    if (mo > 0) { acc += (mo - 64.0) * (mo - 64.0); ++cnt; }
+                }
+                return std::sqrt (acc / std::max (1, cnt)) * 100.0;
+            };
+            int lw = 0;
+            auto nat = run (wn, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); }, lw);   // Natural (por defecto)
+            const double sin_ = spread (wn.data(), (int) wn.size(), 0), sout = spread (nat.getReadPointer (0), nat.getNumSamples(), lw);
+            std::printf ("inseguridade: desviación da nota %.1f c -> %.1f c (Natural)\n", sin_, sout);
+            check ("Natural corrixe a inseguridade (non a toma por vibrato)", sout < 0.5 * sin_);
         }
 
         // tolerancia 40 cents e notas libres: case non se toca

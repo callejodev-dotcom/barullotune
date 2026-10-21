@@ -527,6 +527,8 @@ private:
         double tS = 0, cS = 0, vibRamp = 0, tolTimer = 0;
         double ic1 = 0, ic2 = 0;   // filtro de estado (TPT) do vibrato
         double prevCentre = 0, slope = 0;   // pendente do centro da voz (semitonos/s)
+        // detector de vibrato: só se respecta unha oscilación regular (4–8 Hz, varios ciclos)
+        double clock = 0, lastZc = -1e9, lastHalf = 0, vibEnv = 0, vibConf = 0; int vibSign = 0;
     };
 
     double alphaFor (double ms, double dt) const { return ms <= 0.0 ? 1.0 : 1.0 - std::exp (-dt / (ms * 0.001 * sr)); }
@@ -543,6 +545,30 @@ private:
         return k * v1;
     }
 
+    // ¿é vibrato de verdade? Mira os cruces por cero da banda de vibrato: se os medios
+    // ciclos duran 60–140 ms, parécense entre si e a oscilación pasa de ~12 cents, a
+    // confianza sobe; se son irregulares (a inseguridade dunha voz), baixa e esa
+    // oscilación corríxese coma calquera desafinación.
+    void updateVibratoConfidence (CorrState& st, double band, double dt) const
+    {
+        st.clock += dt;
+        st.vibEnv = std::max (std::abs (band), st.vibEnv * std::exp (-dt / (0.15 * sr)));
+        const int sg = band > 0.0 ? 1 : (band < 0.0 ? -1 : 0);
+        if (sg != 0 && st.vibSign != 0 && sg != st.vibSign)
+        {
+            const double half = (st.clock - st.lastZc) / sr;
+            const bool rate = half > 0.060 && half < 0.140;
+            const bool steady = st.lastHalf > 0 && half / st.lastHalf > 0.7 && half / st.lastHalf < 1.43;
+            const bool deep = st.vibEnv > 0.08;
+            st.vibConf = (rate && steady && deep) ? std::min (1.0, st.vibConf + 0.5) : std::max (0.0, st.vibConf - 0.5);
+            st.lastHalf = rate ? half : 0.0;
+            st.lastZc = st.clock;
+        }
+        if (sg != 0) st.vibSign = sg;
+        // sen cruces hai máis de 160 ms: xa non é vibrato
+        if ((st.clock - st.lastZc) / sr > 0.16) st.vibConf *= std::exp (-dt / (0.1 * sr));
+    }
+
     // corrección en semitonos para unha voz en m (MIDI) que vai a tgt; dt = mostras desde o paso anterior
     double correctionStep (CorrState& st, double m, int tgt, double dt, double& outMidi)
     {
@@ -553,6 +579,7 @@ private:
             st.active = true; st.tS = tgt; st.vibRamp = 0; st.tolTimer = 0;
             st.ic1 = 0; st.ic2 = m;
             st.prevCentre = m; st.slope = 0;
+            st.clock = 0; st.lastZc = -1e9; st.lastHalf = 0; st.vibEnv = 0; st.vibConf = 0; st.vibSign = 0;
             const double err = st.tS - m;
             st.cS = (free || std::abs (err) * 100.0 < tolCents) ? 0.0 : err * amount;
             st.lastTarget = tgt;
@@ -563,7 +590,9 @@ private:
         st.lastTarget = tgt;
         st.tS += (tgt - st.tS) * alphaFor (transitionMs, dt);
         st.vibRamp = std::min (1.0, st.vibRamp + dt / (0.10 * sr));
-        const double vib = clampd (vibratoBand (st, m, dt), -1.5, 1.5) * st.vibRamp;
+        const double band = clampd (vibratoBand (st, m, dt), -1.5, 1.5);
+        updateVibratoConfidence (st, band, dt);
+        const double vib = band * st.vibRamp * st.vibConf;
         const double centre = m - vib;
         const double err = st.tS - centre;
         // portamentos: mentres a voz vai dunha nota a outra (máis de 4 semitonos/s), a

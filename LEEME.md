@@ -2,6 +2,8 @@
 
 Unha ferramenta de [Escoita](https://www.escoita.link).
 
+**[Manual](docs/MANUAL.md)**: como se usa, con receitas para os casos de sempre.
+
 ## Descargas
 
 | Sistema | Instalador | Á man |
@@ -14,7 +16,7 @@ Se o sistema avisa ao abrilo:
 - **Mac:** clic dereito sobre o instalador → *Abrir* → *Abrir*.
 - **Windows:** «Windows protexeu o teu PC» → *Máis información* → *Executar de todos os xeitos*.
 
-Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada raro.
+Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada raro. (Para asinalos, ver `packaging/FIRMA.md`: o CI xa está preparado.)
 
 ## Que ten
 
@@ -61,7 +63,8 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 | `tools/banco.py` | Banco de voces reais: cada voz polos tres xeitos, con cents, saltos (a saída sepárase máis de 1,6 semitonos da entrada) e perdas |
 | `tools/analise.py` | Mide a afinación dunha voz antes e despois (YIN, vibrato, centro das notas, gráfico) |
 | `tools/voces/LEEME.md` | De onde saen as voces reais das probas |
-| `packaging/` | Instaladores para Mac, Windows e Linux |
+| `packaging/` | Instaladores para Mac, Windows e Linux; `FIRMA.md`, como asinalos |
+| `docs/` | O manual; as capturas fanse soas con `tools/capturas.sh` |
 
 ## Probas
 

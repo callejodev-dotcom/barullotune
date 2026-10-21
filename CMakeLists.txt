@@ -83,6 +83,7 @@ target_link_libraries(BarulloTune
     BTFonts
     juce::juce_audio_utils
     juce::juce_audio_processors
+    juce::juce_dsp
   PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
@@ -112,7 +113,7 @@ if(BARULLO_TESTS)
     target_compile_options(BTRenderTest PRIVATE /utf-8 /bigobj)
   endif()
   target_compile_definitions(BTRenderTest PRIVATE BARULLO_VERSION="${PROJECT_VERSION}" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BARULLO_NO_PLUGIN_ENTRY=1)
-  target_link_libraries(BTRenderTest PRIVATE BTFonts juce::juce_audio_utils juce::juce_audio_processors juce::juce_audio_formats
+  target_link_libraries(BTRenderTest PRIVATE BTFonts juce::juce_audio_utils juce::juce_audio_processors juce::juce_audio_formats juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
   if(BARULLO_SANITIZE AND NOT MSVC)
     target_compile_options(BTRenderTest PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)

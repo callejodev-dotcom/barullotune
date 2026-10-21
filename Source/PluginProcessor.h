@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 #include <array>
 #include <atomic>
 #include "tune/Engine.h"
@@ -54,6 +55,38 @@ namespace scales
 
     // tonalidade a partir dun histograma de clases de altura (perfís de Krumhansl–Kessler).
     // Devolve tónica (0–11) e escala (1 = maior, 2 = menor natural).
+    // Dous histogramas (a voz e o acompañamento): cada un correlaciónase cos perfís por
+    // separado e súmanse as puntuacións cos pesos. (Sumar os histogramas facía que unha
+    // nota soa e longa da voz mandase: saía de tónica.)
+    std::pair<int, int> detectKey (const float* hist);
+    inline std::pair<int, int> detectKeyCombined (const float* a, float wa, const float* b, float wb)
+    {
+        static const double maj[12] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
+        static const double mnr[12] = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
+        auto corr = [] (const float* hist, const double* prof, int k)
+        {
+            double mx = 0, my = 0;
+            for (int i = 0; i < 12; ++i) { mx += hist[(i + k) % 12]; my += prof[i]; }
+            mx /= 12; my /= 12;
+            double sxy = 0, sxx = 0, syy = 0;
+            for (int i = 0; i < 12; ++i)
+            {
+                const double x = hist[(i + k) % 12] - mx, y = prof[i] - my;
+                sxy += x * y; sxx += x * x; syy += y * y;
+            }
+            return sxy / std::sqrt (sxx * syy + 1e-12);
+        };
+        int bk = 0, bs = 1; double best = -1e9;
+        for (int k = 0; k < 12; ++k)
+            for (int sc = 1; sc <= 2; ++sc)
+            {
+                const double* prof = sc == 1 ? maj : mnr;
+                const double v = (wa > 0 ? wa * corr (a, prof, k) : 0.0) + (wb > 0 ? wb * corr (b, prof, k) : 0.0);
+                if (v > best) { best = v; bk = k; bs = sc; }
+            }
+        return { bk, bs };
+    }
+
     inline std::pair<int, int> detectKey (const float* hist)
     {
         static const double maj[12] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
@@ -148,7 +181,7 @@ public:
     void startKeyListening();
     void stopKeyListening() { keyListening = false; }
     bool isKeyListening() const { return keyListening.load(); }
-    float keyProgress() const { return juce::jlimit (0.0f, 1.0f, keyHeard.load() / keyListenSeconds); }
+    float keyProgress() const { return juce::jlimit (0.0f, 1.0f, juce::jmax (keyHeard.load(), chromaHeard.load()) / keyListenSeconds); }
     bool finishKeyIfReady();   // fío da interface: aplica a tonalidade cando xa escoitou abondo
     void flushLatencyUpdate() { handleUpdateNowIfNeeded(); }   // para as probas
 
@@ -193,6 +226,16 @@ private:
     std::atomic<bool> keyListening { false };
     std::atomic<float> keyHeard { 0 };
     std::array<std::atomic<float>, 12> keyHist {};
+    // croma do acompañamento (entrada lateral)
+    // FFT de 16384 (barras de 2,9 Hz a 48 kHz: medio semitono xa aos 100 Hz) cada 4096 mostras
+    static constexpr int chromaOrder = 14, chromaFft = 1 << chromaOrder, chromaHop = chromaFft / 4;
+    void chromaFrame();
+    juce::dsp::FFT chromaFftObj { chromaOrder };
+    std::vector<float> scRing, fftData, hann, binW;
+    std::vector<int> binLo;
+    int scPos = 0, scCount = 0;
+    std::array<std::atomic<float>, 12> chroma {};
+    std::atomic<float> chromaHeard { 0 };
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
     std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman, *pPrincipal, *pHarmMode;

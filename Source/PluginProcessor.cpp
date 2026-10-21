@@ -113,7 +113,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
 TuneProcessor::TuneProcessor()
     : AudioProcessor (BusesProperties()
                         .withInput ("Entrada", juce::AudioChannelSet::stereo(), true)
-                        .withOutput ("Saída", juce::AudioChannelSet::stereo(), true)),
+                        .withOutput ("Saída", juce::AudioChannelSet::stereo(), true)
+                        .withInput ("Acompañamento", juce::AudioChannelSet::stereo(), false)),   // para detectar a tonalidade coa base
       params (*this, nullptr, "BarulloTune", layout())
 {
     pModo = params.getRawParameterValue ("modo");
@@ -164,6 +165,7 @@ TuneProcessor::TuneProcessor()
     for (int i = 0; i < 12; ++i) pNota[(size_t) i] = params.getRawParameterValue ("nota" + juce::String (i));
     for (int i = 0; i < 12; ++i) pLibre[(size_t) i] = params.getRawParameterValue ("libre" + juce::String (i));
     for (auto& h : keyHist) h = 0;
+    for (auto& h : chroma) h = 0;
 
     engine.prepare (44100.0);
     latencyNow = -1;
@@ -195,16 +197,21 @@ void TuneProcessor::handleAsyncUpdate() { setLatencySamples (latencyNow.load());
 void TuneProcessor::startKeyListening()
 {
     for (auto& h : keyHist) h = 0;
-    keyHeard = 0;
+    for (auto& h : chroma) h = 0;
+    keyHeard = 0; chromaHeard = 0;
     keyListening = true;
 }
 
+// A tonalidade sae da voz e, se hai acompañamento na entrada lateral, tamén del (o
+// croma da base pesa máis, 70 %: ten os acordes). Abonda con oito segundos de calquera dos dous.
 bool TuneProcessor::finishKeyIfReady()
 {
-    if (! keyListening.load() || keyHeard.load() < keyListenSeconds) return false;
-    float h[12];
-    for (int i = 0; i < 12; ++i) h[i] = keyHist[(size_t) i].load();
-    const auto k = scales::detectKey (h);
+    if (! keyListening.load() || juce::jmax (keyHeard.load(), chromaHeard.load()) < keyListenSeconds) return false;
+    float hv[12], hc[12], sv = 0, sc = 0;
+    for (int i = 0; i < 12; ++i) { hv[i] = keyHist[(size_t) i].load(); hc[i] = chroma[(size_t) i].load(); sv += hv[i]; sc += hc[i]; }
+    const float wv = keyHeard.load() > 1.0f && sv > 0 ? (chromaHeard.load() > 1.0f ? 0.3f : 1.0f) : 0.0f;
+    const float wc = chromaHeard.load() > 1.0f && sc > 0 ? (keyHeard.load() > 1.0f ? 0.7f : 1.0f) : 0.0f;
+    const auto k = scales::detectKeyCombined (hv, wv, hc, wc);
     setParamPlain ("tonica", (float) k.first);
     setParamPlain ("escala", (float) k.second);
     keyListening = false;
@@ -215,7 +222,13 @@ bool TuneProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 {
     const auto in = l.getMainInputChannelSet(), out = l.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo()) return false;
-    return in == out;
+    if (in != out) return false;
+    if (l.inputBuses.size() > 1)
+    {
+        const auto sc = l.getChannelSet (true, 1);
+        if (! sc.isDisabled() && sc != juce::AudioChannelSet::mono() && sc != juce::AudioChannelSet::stereo()) return false;
+    }
+    return true;
 }
 
 void TuneProcessor::prepareToPlay (double sr, int)
@@ -241,6 +254,21 @@ void TuneProcessor::prepareToPlay (double sr, int)
     airHpA = (float) std::exp (-2.0 * juce::MathConstants<double>::pi * 2000.0 / sr);
     airLpA = (float) (1.0 - std::exp (-2.0 * juce::MathConstants<double>::pi * 9000.0 / sr));
     airGate = 0;
+    // croma do acompañamento: cada bin entre 100 Hz e 5 kHz repártese entre as dúas clases
+    // de altura máis próximas
+    scRing.assign (chromaFft, 0.0f); scPos = 0; scCount = 0;
+    fftData.assign (2 * chromaFft, 0.0f);
+    hann.resize (chromaFft);
+    for (int i = 0; i < chromaFft; ++i) hann[(size_t) i] = (float) (0.5 - 0.5 * std::cos (2.0 * juce::MathConstants<double>::pi * i / chromaFft));
+    binLo.assign (chromaFft / 2, -1); binW.assign (chromaFft / 2, 0.0f);
+    for (int k = 1; k < chromaFft / 2; ++k)
+    {
+        const double f = k * sr / chromaFft;
+        if (f < 100.0 || f > 5000.0) continue;
+        const double pm = 69.0 + 12.0 * std::log2 (f / 440.0), fl = std::floor (pm);
+        binLo[(size_t) k] = ((int) fl % 12 + 12) % 12;
+        binW[(size_t) k] = (float) (1.0 - (pm - fl));   // o resto vai á seguinte
+    }
     midiOutBuf.ensureSize (2048);
     leadSm.reset (sr, 0.03); leadSm.setCurrentAndTargetValue (leadGainTarget());
     harmSm.reset (sr, 0.03); harmSm.setCurrentAndTargetValue (pComp->load() > 0.5f ? 0.0f : 1.0f);
@@ -337,6 +365,32 @@ bool TuneProcessor::loadScala (const juce::String& text, juce::String& error)
     setParamPlain ("escala", (float) scales::custom);
     setParamPlain ("afinacion", 2.0f);
     return true;
+}
+
+void TuneProcessor::chromaFrame()
+{
+    float energy = 0;
+    for (int i = 0; i < chromaFft; ++i)
+    {
+        const float v = scRing[(size_t) ((scPos + i) % chromaFft)];
+        fftData[(size_t) i] = v * hann[(size_t) i]; energy += v * v;
+    }
+    std::fill (fftData.begin() + chromaFft, fftData.end(), 0.0f);
+    if (energy / chromaFft < 1.0e-7f) return;   // silencio (−70 dBFS)
+    chromaFftObj.performFrequencyOnlyForwardTransform (fftData.data());
+    float c[12] {}, sum = 0;
+    for (int k = 1; k < chromaFft / 2; ++k)
+    {
+        const int lo = binLo[(size_t) k];
+        if (lo < 0) continue;
+        const float e = fftData[(size_t) k] * fftData[(size_t) k];
+        c[lo] += e * binW[(size_t) k]; c[(lo + 1) % 12] += e * (1.0f - binW[(size_t) k]);
+        sum += e;
+    }
+    if (sum <= 0) return;
+    const float dt = (float) chromaHop / (float) getSampleRate();
+    for (int i = 0; i < 12; ++i) chroma[(size_t) i] = chroma[(size_t) i].load() + c[i] / sum * dt;
+    chromaHeard = chromaHeard.load() + dt;
 }
 
 uint16_t TuneProcessor::effectiveMask() const
@@ -456,7 +510,9 @@ void TuneProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce
 void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, bool hostBypass)
 {
     juce::ScopedNoDenormals noDenormals;
-    const int numCh = buffer.getNumChannels(), numIn = juce::jmin (numCh, getTotalNumInputChannels());
+    // só as canles do bus principal (a entrada lateral, se a hai, vén despois)
+    const int numCh = juce::jmin (buffer.getNumChannels(), juce::jmax (1, getMainBusNumOutputChannels())),
+              numIn = juce::jmin (buffer.getNumChannels(), getMainBusNumInputChannels());
     const int n = buffer.getNumSamples();
 
     // cambio de xeito ou de voz: primeiro baixa a saída (abaixo, mostra a mostra)
@@ -506,6 +562,20 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     bypassSm.setTargetValue (hostBypass || pBypass->load() > 0.5f ? 1.0f : 0.0f);
 
     const bool midiOutOn = pMidiOut->load() > 0.5f;
+    // acompañamento (entrada lateral), só mentres se escoita a tonalidade
+    const bool sideOn = keyListening.load() && getBusCount (true) > 1 && getBus (true, 1)->isEnabled() && getBus (true, 1)->getNumberOfChannels() > 0;
+    if (sideOn)
+    {
+        auto sc = getBusBuffer (buffer, true, 1);
+        const int scn = sc.getNumChannels();
+        for (int i = 0; i < n; ++i)
+        {
+            float v = 0; for (int c = 0; c < scn; ++c) v += sc.getReadPointer (c)[i];
+            scRing[(size_t) scPos] = v / (float) juce::jmax (1, scn);
+            scPos = (scPos + 1) % chromaFft;
+            if (++scCount >= chromaHop) { scCount = 0; chromaFrame(); }
+        }
+    }
     midiOutBuf.clear();
     auto it = midi.cbegin();
     const auto end = midi.cend();

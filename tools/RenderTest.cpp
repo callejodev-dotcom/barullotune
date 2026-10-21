@@ -1027,6 +1027,49 @@ int main (int argc, char** argv)
         check ("detectar tonalidade: Do maior (ou a súa relativa)", done && p.effectiveMask() == want);
     }
 
+    // tonalidade co acompañamento na entrada lateral: base en Re maior (Re–Sol–La–Re) e a
+    // voz cantando só un La (que soa en moitas tonalidades): sae Re maior (ou Si menor)
+    {
+        TuneProcessor p;
+        auto lay = p.getBusesLayout();
+        lay.inputBuses.getReference (1) = juce::AudioChannelSet::stereo();
+        const bool layoutOk = p.setBusesLayout (lay);
+        p.setRateAndBufferSizeDetails (SR, 512);
+        setP (p, "tonica", 5); setP (p, "escala", 2);
+        p.prepareToPlay (SR, 512);
+        p.startKeyListening();
+        juce::AudioBuffer<float> buf (4, 512);
+        const int chords[4][3] = { { 50, 54, 57 }, { 55, 59, 62 }, { 57, 61, 64 }, { 50, 54, 57 } };
+        double phs[4] = { 0, 0, 0, 0 }, phv = 0;
+        bool done = false; int samples = 0;
+        for (int pos = 0; pos < (int) (12 * SR) && ! done; pos += 512)
+        {
+            for (int i = 0; i < 512; ++i)
+            {
+                const double t = (pos + i) / SR;
+                const auto& ch = chords[(int) (t / 1.0) % 4];
+                double acc = 0;
+                for (int k = 0; k < 4; ++k)
+                {
+                    const int nt = k < 3 ? ch[k] : ch[0] - 12;   // o baixo
+                    phs[k] += 440.0 * std::pow (2.0, (nt - 69) / 12.0) / SR;
+                    for (int h = 1; h <= 6; ++h) acc += std::sin (2 * juce::MathConstants<double>::pi * h * phs[k]) / (h * h);
+                }
+                phv += 440.0 / SR;
+                double v = 0; for (int h = 1; h <= 20; ++h) v += envAt (VA, h * 440.0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * phv);
+                buf.setSample (0, i, (float) (0.08 * v)); buf.setSample (1, i, (float) (0.08 * v));
+                buf.setSample (2, i, (float) (0.05 * acc)); buf.setSample (3, i, (float) (0.05 * acc));
+            }
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            samples += 512;
+            done = p.finishKeyIfReady();
+        }
+        const uint16_t dMajor = scales::rotate (scales::all()[1].mask, 2);
+        std::printf ("tonalidade co acompañamento: %s %s (en %.1f s)\n", scales::noteName ((int) p.params.getRawParameterValue ("tonica")->load()).toRawUTF8(),
+                     scales::all()[(size_t) p.params.getRawParameterValue ("escala")->load()].name, samples / SR);
+        check ("tonalidade co acompañamento na entrada lateral: Re maior", layoutOk && done && p.effectiveMask() == dMajor);
+    }
+
     // presets: Robot pon velocidade, transición e vibrato a 0; o preset gárdase co estado
     {
         TuneProcessor a;

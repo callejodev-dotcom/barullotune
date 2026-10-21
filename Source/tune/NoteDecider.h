@@ -146,16 +146,16 @@ public:
             int best = -1; double bd = 1e9;
             const int c = (int) std::lround (md);
             for (int k = c - 7; k <= c + 7; ++k)
-                if (noteAllowed (set, midi, k) && std::abs (md - k) < bd) { bd = std::abs (md - k); best = k; }
+                if (noteAllowed (set, midi, k) && std::abs (md - set.pitchOf (k)) < bd) { bd = std::abs (md - set.pitchOf (k)); best = k; }
             if (best < 0) best = c;
-            const bool keep = was && t >= 0 && noteAllowed (set, midi, t) && std::abs (md - t) < 0.6;
+            const bool keep = was && t >= 0 && noteAllowed (set, midi, t) && std::abs (md - set.pitchOf (t)) < 0.6;
             if (! keep && best != t)
             {
                 if (best != candidate) { candidate = best; candHeld = 0; }
                 candHeld += dt;
                 // se a voz vai claramente cara á nota nova (máis de 5 semitonos/s), acéptase xa
-                const bool movingThere = std::abs (decSlope) > 5.0 && (best - t) * decSlope > 0 && std::abs (md - t) > 0.5;
-                if (! was || t < 0 || ! noteAllowed (set, midi, t) || std::abs (md - t) > 0.9 || movingThere || candHeld >= 0.025 * sr) t = best;
+                const bool movingThere = std::abs (decSlope) > 5.0 && (best - t) * decSlope > 0 && std::abs (md - set.pitchOf (t)) > 0.5;
+                if (! was || t < 0 || ! noteAllowed (set, midi, t) || std::abs (md - set.pitchOf (t)) > 0.9 || movingThere || candHeld >= 0.025 * sr) t = best;
             }
             else candidate = -1;
         }

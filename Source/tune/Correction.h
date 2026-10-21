@@ -25,6 +25,10 @@ struct Settings
     double formant = 0.0;      // semitonos (en Directo e Preciso, coa corrección de formantes)
     double flex = 0.0;         // 0..1: canto máis lonxe da nota, menos se corrixe (blue notes, arrastres)
     double humanize = 0.0;     // 0..1: nas notas longas a corrección vaise relaxando
+    double tuneCents[12] {};   // afinación: cents de cada clase de altura (absoluta, 0 = Do)
+
+    // a altura (MIDI, con decimais) á que vai unha nota coa afinación
+    double pitchOf (int note) const { return note + tuneCents[((note % 12) + 12) % 12] * 0.01; }
 
     // vibrato xerado (enriba do da voz, que se escala con «vibrato»)
     double vibDepth = 0.0;     // cents (0 = sen vibrato xerado)
@@ -93,7 +97,7 @@ public:
         if (! st.active)
         {
             // comezo dunha nota: xa afinada
-            st.active = true; st.tS = tgt; st.vibRamp = 0; st.tolTimer = 0;
+            st.active = true; st.tS = set.pitchOf (tgt); st.vibRamp = 0; st.tolTimer = 0;
             st.ic1 = 0; st.ic2 = m;
             st.prevCentre = m; st.slope = 0;
             st.clock = 0; st.lastZc = -1e9; st.lastHalf = 0; st.vibEnv = 0; st.vibConf = 0; st.vibSign = 0;
@@ -109,7 +113,7 @@ public:
         if (tgt != st.lastTarget) { st.vibRamp = 0; st.noteAge = 0; }   // nota nova: o vibrato volve entrar amodo
         st.noteAge += dt;
         st.lastTarget = tgt;
-        st.tS += (tgt - st.tS) * alphaFor (set.transitionMs, dt);
+        st.tS += (set.pitchOf (tgt) - st.tS) * alphaFor (set.transitionMs, dt);
         st.vibRamp = std::min (1.0, st.vibRamp + dt / (0.10 * sr));
         const double band = clampd (vibratoBand (st, m, dt), -1.5, 1.5);
         updateVibratoConfidence (st, band, dt);

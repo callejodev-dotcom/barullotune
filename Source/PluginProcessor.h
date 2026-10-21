@@ -8,23 +8,41 @@ namespace scales
 {
     // intervalos sobre a tónica (bit i = semitono i)
     struct Scale { const char* name; uint16_t mask; };
-    inline const std::array<Scale, 10>& all()
+    inline const std::array<Scale, 20>& all()
     {
-        static const std::array<Scale, 10> s { {
-            { "Cromática",         0x0FFF },
-            { "Maior",             0b101010110101 },
-            { "Menor natural",     0b010110101101 },
-            { "Menor harmónica",   0b100110101101 },
-            { "Pentatónica maior", 0b001010010101 },
-            { "Pentatónica menor", 0b010010101001 },
-            { "Blues",             0b010011101001 },
-            { "Dórica",            0b011010101101 },
-            { "Mixolidia",         0b011010110101 },
-            { "Personalizada",     0 },
+        static const std::array<Scale, 20> s { {
+            { "Cromática",           0x0FFF },
+            { "Maior",               0b101010110101 },
+            { "Menor natural",       0b010110101101 },
+            { "Menor harmónica",     0b100110101101 },
+            { "Pentatónica maior",   0b001010010101 },
+            { "Pentatónica menor",   0b010010101001 },
+            { "Blues",               0b010011101001 },
+            { "Dórica",              0b011010101101 },
+            { "Mixolidia",           0b011010110101 },
+            { "Menor melódica",      0b101010101101 },
+            { "Frixia",              0b010110101011 },
+            { "Lidia",               0b101011010101 },
+            { "Locria",              0b010101101011 },
+            { "Frixia dominante",    0b010110110011 },   // a do flamenco
+            { "Dobre harmónica",     0b100110110011 },
+            { "Tons enteiros",       0b010101010101 },
+            { "Disminuída",          0b101101101101 },   // ton-semitono
+            { "Hirajoshi",           0b000110001101 },
+            { "Blues maior",         0b001010011101 },
+            { "Personalizada",       0 },
         } };
         return s;
     }
-    constexpr int custom = 9;
+    constexpr int custom = 19;
+    constexpr int customV1 = 9;   // «Personalizada» nos estados da versión 1 (antes das escalas novas)
+
+    // afinación xusta (5-limit) respecto da tónica: cents de cada grao cromático
+    inline double justCents (int degree)
+    {
+        static const double c[12] = { 0.0, 11.73, 3.91, 15.64, -13.69, -1.96, -9.78, 1.96, 13.69, -15.64, 17.60, -11.73 };
+        return c[((degree % 12) + 12) % 12];
+    }
     inline juce::String noteName (int pc)
     {
         static const char* n[12] = { "Do", "Do♯", "Re", "Mi♭", "Mi", "Fa", "Fa♯", "Sol", "La♭", "La", "Si♭", "Si" };
@@ -100,7 +118,7 @@ public:
     void setStateInformation (const void*, int) override;
     // versión do formato do estado: súbese cada vez que cambian os parámetros, e
     // migrateState() leva os estados vellos ao formato novo
-    static constexpr int stateVersion = 1;
+    static constexpr int stateVersion = 2;
     static void migrateState (juce::ValueTree& state, int fromVersion);
 
     juce::AudioProcessorValueTreeState params;
@@ -117,6 +135,13 @@ public:
     uint16_t freeMask() const;
     void toggleFreeNote (int pc);
     void setParamPlain (const juce::String& id, float plain);
+
+    // afinación de cada clase de altura (cents, absoluta: 0 = Do), segundo «afinacion»
+    void tuningCents (double* cents12) const;
+    // escala de Scala (.scl): pon a escala Personalizada (as notas máis próximas a cada grao,
+    // desde a tónica) e a afinación Personalizada cos cents de cada unha. Escalas de ata 12
+    // graos por oitava; se dous graos caen na mesma nota, erro.
+    bool loadScala (const juce::String& text, juce::String& error);
 
     // detectar a tonalidade escoitando a voz uns segundos
     static constexpr float keyListenSeconds = 8.0f;
@@ -171,7 +196,8 @@ private:
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
     std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman, *pPrincipal, *pHarmMode;
-    std::atomic<float>* pVgDepth, *pVgRate, *pVgDelay, *pVgVar, *pVgTrem;
+    std::atomic<float>* pVgDepth, *pVgRate, *pVgDelay, *pVgVar, *pVgTrem, *pAfin;
+    std::array<std::atomic<float>*, 12> pCents {};
     struct HarmParams { std::atomic<float>* on, *interval, *level, *pan, *detune, *delay, *formant; };
     std::array<HarmParams, numHarmonies> harmP {};
     struct HarmState { std::vector<float> line; int pos = 0; juce::SmoothedValue<float> gL, gR, del; };

@@ -90,7 +90,7 @@ public:
         {
             const int ht = sounding ? harmonyNote (set, an.midi, target, role.index) : -1;
             sounding = ht >= 0;
-            if (sounding) offset = (ht - target) + set.harm[role.index].detune * 0.01;
+            if (sounding) offset = (set.pitchOf (ht) - set.pitchOf (target)) + set.harm[role.index].detune * 0.01;
             formant += set.harm[role.index].formant;
         }
         const bool starting = sounding && ! state.active;

@@ -1111,6 +1111,61 @@ int main (int argc, char** argv)
         check ("estados rotos: sen problemas", true);
     }
 
+    // escalas e afinación
+    {
+        // estado da versión 1 con «Personalizada» (daquela o 9): segue sendo Personalizada
+        TuneProcessor a;
+        a.toggleScaleNote (1);   // pasa a Personalizada
+        const uint16_t maskA = a.effectiveMask();
+        juce::MemoryBlock mb; a.getStateInformation (mb);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+        xml->setAttribute ("version", 1);
+        if (auto* e = xml->getChildByAttribute ("id", "escala")) e->setAttribute ("value", (double) scales::customV1);
+        juce::MemoryBlock old; juce::AudioProcessor::copyXmlToBinary (*xml, old);
+        TuneProcessor b; b.setStateInformation (old.getData(), (int) old.getSize());
+        check ("estado da versión 1: Personalizada segue sendo Personalizada", (int) b.params.getRawParameterValue ("escala")->load() == scales::custom && b.effectiveMask() == maskA);
+
+        // frixia dominante en Mi: Mi Fa Sol♯ La Si Do Re
+        TuneProcessor f; setP (f, "tonica", 4); setP (f, "escala", 13);
+        check ("frixia dominante en Mi", juce::String (scales::all()[13].name) == juce::String ("Frixia dominante")
+                                          && f.effectiveMask() == (uint16_t) ((1 << 4) | (1 << 5) | (1 << 8) | (1 << 9) | (1 << 11) | (1 << 0) | (1 << 2)));
+
+        // afinación: un Mi en Do maior, robot. Igual: 0 c; xusta: −13,7 c; personalizada +30 c
+        std::vector<float> e4 ((size_t) (1.2 * SR)); double ph = 0;
+        for (size_t i = 0; i < e4.size(); ++i)
+        {
+            const double f0 = 440.0 * std::pow (2.0, (64.08 - 69) / 12.0); ph += f0 / SR; double sm = 0;
+            for (int h = 1; h <= 30; ++h) sm += envAt (VA, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+            e4[i] = (float) (0.1 * sm * std::min (1.0, (double) i / (0.03 * SR)));
+        }
+        auto centre = [&] (int afin, float cents4)
+        {
+            int l = 0;
+            auto y = run (e4, 512, 1, [&] (TuneProcessor& p) { setP (p, "calidade", 2); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
+                                                               setP (p, "afinacion", (float) afin); setP (p, "cents4", cents4); }, l);
+            double acc = 0; int cnt = 0;
+            for (int64_t c = (int64_t) (0.3 * SR); c < (int64_t) (1.1 * SR); c += 240) { const double mo = measure (y.getReadPointer (0), y.getNumSamples(), c + l); if (mo > 0) { acc += mo; ++cnt; } }
+            return (acc / std::max (1, cnt) - 64.0) * 100.0;
+        };
+        const double cEq = centre (0, 0), cJust = centre (1, 0), cCust = centre (2, 30);
+        std::printf ("afinación dun Mi en Do maior: igual %+.1f c, xusta %+.1f c (agardado −13,7), personalizada %+.1f c (agardado +30)\n", cEq, cJust, cCust);
+        check ("afinación igual, xusta e personalizada", std::abs (cEq) < 1.5 && std::abs (cJust + 13.69) < 1.5 && std::abs (cCust - 30.0) < 1.5);
+
+        // Scala: unha escala xusta de 7 notas (Ptolomeo) en Re, e unha de 17 notas (erro)
+        TuneProcessor sc; setP (sc, "tonica", 2);
+        juce::String err;
+        const bool ok = sc.loadScala ("! ptolemy.scl\n!\nEscala diatónica intensa de Ptolomeo\n 7\n!\n 9/8\n 5/4\n 4/3\n 3/2\n 5/3\n 15/8\n 2/1\n", err);
+        double cs[12]; sc.tuningCents (cs);
+        const uint16_t want = (uint16_t) ((1 << 2) | (1 << 4) | (1 << 6) | (1 << 7) | (1 << 9) | (1 << 11) | (1 << 1));   // Re maior
+        const bool ok1 = ok && sc.effectiveMask() == want && std::abs (cs[6] + 13.69) < 0.05 && std::abs (cs[4] - 3.91) < 0.05 && std::abs (cs[2]) < 0.01;
+        juce::String text17 ("17-EDO\n17\n");
+        for (int i = 1; i <= 17; ++i) text17 << juce::String (1200.0 * i / 17.0, 3) << "\n";
+        juce::String err17;
+        const bool bad = ! sc.loadScala (text17, err17);
+        std::printf ("Scala: Ptolomeo en Re %s (Fa♯ %+.2f c, Mi %+.2f c); 17-EDO: %s\n", ok1 ? "ben" : "MAL", cs[6], cs[4], err17.toRawUTF8());
+        check ("Scala: escala de 7 notas cargada e a de 17 rexeitada", ok1 && bad);
+    }
+
     // automatización ao chou: todos os parámetros, bloques de 1 a 1024 mostras, MIDI, cambios
     // de xeito e de frecuencia de mostraxe, con voz, ruído, silencio, continua, cadrada a 0 dBFS
     // e impulsos. Nada pode saír non finito nin disparado.

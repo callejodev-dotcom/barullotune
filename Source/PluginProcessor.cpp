@@ -22,6 +22,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
         l.add (std::make_unique<AudioParameterBool> (ParameterID { "nota" + String (i), 1 }, U ("Nota ") + scales::noteName (i), true));
     for (int i = 0; i < 12; ++i)
         l.add (std::make_unique<AudioParameterBool> (ParameterID { "libre" + String (i), 1 }, U ("Libre ") + scales::noteName (i), false));
+    // afinación: igual (12 semitonos iguais), xusta (respecto da tónica) ou personalizada (cents por nota)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "afinacion", 1 }, U ("Afinación"), StringArray { U ("Igual"), U ("Xusta"), U ("Personalizada") }, 0));
+    for (int i = 0; i < 12; ++i)
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { "cents" + String (i), 1 }, U ("Cents ") + scales::noteName (i), NormalisableRange<float> (-50.0f, 50.0f, 0.01f), 0.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " c"; })));
 
     auto msFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("0 ms") : String (roundToInt (v)) + " ms"; });
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "velocidade", 1 }, U ("Velocidade"),
@@ -128,6 +133,8 @@ TuneProcessor::TuneProcessor()
     pVgDelay = params.getRawParameterValue ("vibgen_retardo");
     pVgVar = params.getRawParameterValue ("vibgen_variacion");
     pVgTrem = params.getRawParameterValue ("vibgen_tremolo");
+    pAfin = params.getRawParameterValue ("afinacion");
+    for (int i = 0; i < 12; ++i) pCents[(size_t) i] = params.getRawParameterValue ("cents" + juce::String (i));
     pHarmMode = params.getRawParameterValue ("armonia_modo");
     for (int h = 0; h < numHarmonies; ++h)
     {
@@ -252,6 +259,63 @@ void TuneProcessor::harmGains (int h, float& gl, float& gr) const
     const float a = (juce::jlimit (-100.0f, 100.0f, hp.pan->load()) + 100.0f) / 200.0f * juce::MathConstants<float>::halfPi;
     gl = g * std::cos (a) * juce::MathConstants<float>::sqrt2;   // no centro, cada lado a 0 dB
     gr = g * std::sin (a) * juce::MathConstants<float>::sqrt2;
+}
+
+void TuneProcessor::tuningCents (double* c) const
+{
+    const int mode = juce::jlimit (0, 2, (int) pAfin->load()), tonic = (int) pTonica->load();
+    for (int pc = 0; pc < 12; ++pc)
+        c[pc] = mode == 1 ? scales::justCents (pc - tonic) : mode == 2 ? (double) pCents[(size_t) pc]->load() : 0.0;
+}
+
+bool TuneProcessor::loadScala (const juce::String& text, juce::String& error)
+{
+    // formato Scala: liñas que empezan por «!» son comentarios; a primeira outra liña é a
+    // descrición, a seguinte o número de notas, e despois unha nota por liña: cents (con
+    // punto) ou unha razón (3/2, 5). A última é a oitava (ou o intervalo de repetición).
+    juce::StringArray lines;
+    lines.addLines (text);
+    juce::StringArray rows;
+    for (auto& ln : lines) { const auto t = ln.trim(); if (! t.startsWith ("!")) rows.add (t); }
+    if (rows.size() < 2) { error = U ("O ficheiro non parece unha escala de Scala."); return false; }
+    const int count = rows[1].getIntValue();
+    if (count < 1 || rows.size() < 2 + count) { error = U ("Faltan notas na escala."); return false; }
+    std::vector<double> cents { 0.0 };
+    for (int i = 0; i < count; ++i)
+    {
+        const auto tok = rows[2 + i].upToFirstOccurrenceOf (" ", false, false).trim();
+        double c = 0;
+        if (tok.containsChar ('.')) c = tok.getDoubleValue();
+        else
+        {
+            const double num = tok.upToFirstOccurrenceOf ("/", false, false).getDoubleValue();
+            const double den = tok.containsChar ('/') ? tok.fromFirstOccurrenceOf ("/", false, false).getDoubleValue() : 1.0;
+            if (num <= 0 || den <= 0) { error = U ("Nota sen entender: ") + tok; return false; }
+            c = 1200.0 * std::log2 (num / den);
+        }
+        cents.push_back (c);
+    }
+    const double period = cents.back();
+    cents.pop_back();   // a oitava (ou o período) é a repetición da tónica
+    if (std::abs (period - 1200.0) > 1.0) { error = U ("A escala non se repite na oitava (") + juce::String (period, 1) + " c)."; return false; }
+    const int tonic = (int) pTonica->load();
+    uint16_t mask = 0; double cpc[12] {};
+    for (double c : cents)
+    {
+        const int deg = (int) std::lround (c / 100.0);
+        const int pc = ((tonic + deg) % 12 + 12) % 12;
+        if ((mask >> pc) & 1) { error = U ("Dous graos da escala caen na mesma nota (máis de 12 por oitava?)."); return false; }
+        mask |= (uint16_t) (1u << pc);
+        cpc[pc] = juce::jlimit (-50.0, 50.0, c - 100.0 * deg);
+    }
+    for (int i = 0; i < 12; ++i)
+    {
+        setParamPlain ("nota" + juce::String (i), ((mask >> i) & 1) ? 1.0f : 0.0f);
+        setParamPlain ("cents" + juce::String (i), (float) cpc[i]);
+    }
+    setParamPlain ("escala", (float) scales::custom);
+    setParamPlain ("afinacion", 2.0f);
+    return true;
 }
 
 uint16_t TuneProcessor::effectiveMask() const
@@ -389,6 +453,7 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     engine.flex = pFlex->load() * 0.01;
     engine.humanize = pHuman->load() * 0.01;
     engine.harmonyMode = juce::jlimit (0, 1, (int) pHarmMode->load());
+    tuningCents (engine.tuneCents);
     engine.vibDepth = pVgDepth->load();
     engine.vibRate = pVgRate->load();
     engine.vibDelayMs = pVgDelay->load();
@@ -516,10 +581,16 @@ void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
 // Cando cambie un parámetro (nome, rango, opcións), súbese stateVersion e tradúcese aquí.
 void TuneProcessor::migrateState (juce::ValueTree& st, int fromVersion)
 {
-    (void) st;
     if (fromVersion < 1)
     {
         // 0 → 1: só se engadiu o bypass; os parámetros que faltan póñense ao valor de fábrica (abaixo)
+    }
+    if (fromVersion < 2)
+    {
+        // 1 → 2: escalas novas antes de «Personalizada» (que pasa do 9 ao 19)
+        auto e = st.getChildWithProperty ("id", "escala");
+        if (e.isValid() && (int) std::lround ((double) e.getProperty ("value", 0.0)) == scales::customV1)
+            e.setProperty ("value", (double) scales::custom, nullptr);
     }
 }
 

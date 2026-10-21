@@ -114,7 +114,7 @@ private:
         {
             const int ht = harmonyNote (set, an.midi, target, role.index);
             sounding = ht >= 0;
-            if (sounding) offset = (ht - target) + set.harm[role.index].detune * 0.01;
+            if (sounding) offset = (set.pitchOf (ht) - set.pitchOf (target)) + set.harm[role.index].detune * 0.01;
         }
         if (mk.voiced && target >= 0)
         {

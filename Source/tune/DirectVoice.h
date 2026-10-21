@@ -29,8 +29,11 @@ public:
         ffixAlphaFast = 1.0 - std::exp (-1.0 / (0.005 * sr));
         envAlpha = 1.0 - std::exp (-1.0 / (0.003 * sr));
         gateAlpha = 1.0 - std::exp (-1.0 / (0.01 * sr));
-        dirAlpha = 1.0 - std::exp (-1.0 / (0.0015 * sr));
-        lookAhead = 0.0015 * sr;   // o atraso dese suavizado
+        // suavizado da corrección: 0,4 ms (con 1,5 ms erraba un 10 % máis nas voces reais e
+        // non soaba máis limpo); o ton mírase ese anaco por diante para compensar o atraso
+        dirAlpha = 1.0 - std::exp (-1.0 / (0.0004 * sr));
+        dirAlphaUnvoiced = 1.0 - std::exp (-1.0 / (0.002 * sr));   // ao entrar nunha consoante, máis amodo (sen estalo na «s»)
+        lookAhead = 0.0004 * sr;
     }
 
     // preciso: a lectura vai 11,5 ms detrás, dentro de ciclos xa medidos (sen extrapolar)
@@ -64,8 +67,8 @@ public:
         if (voiced)
         {
             double mi = 0;
-            // o suavizado da corrección (1,5 ms) atrasaría a corrección: o ton mírase ese
-            // anaco por diante do punto de lectura, así a corrección chega a tempo
+            // o suavizado da corrección atrasaríaa: o ton mírase ese anaco por diante do
+            // punto de lectura, así a corrección chega a tempo
             if (an.pitchAtSliding (rp + rho * lookAhead, mi)) mNow = mi;   // o ton medido á par da lectura
             else if (an.pitchAtFromMarks (rp, mi)) mNow = mi;            // xa medido: o ton dos ciclos onde se le
             else if (an.cycleOk)
@@ -97,7 +100,7 @@ public:
         if (voiced && target >= 0) { double om; raw = corr.step (state, mNow, target, 1.0, an.isFree (target), an.bendNow(), om) + offset; }
         else state.active = false;
         if (starting) dirCorr = raw;
-        else dirCorr += (raw - dirCorr) * dirAlpha;   // 1,5 ms de suavizado, para que non rasque
+        else dirCorr += (raw - dirCorr) * (voiced ? dirAlpha : dirAlphaUnvoiced);   // 0,4 ms de suavizado (2 ms sen ton)
         rho = std::pow (2.0, dirCorr / 12.0);
         if (! role.harmony)
         {
@@ -223,7 +226,7 @@ private:
     bool precise = false;
     FormantFix ffix;
     double sr = 48000;
-    double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, lookAhead = 0, ffixAlpha = 0.001, ffixAlphaFast = 0.004, envAlpha = 0.007;
+    double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, dirAlphaUnvoiced = 0.01, lookAhead = 0, ffixAlpha = 0.001, ffixAlphaFast = 0.004, envAlpha = 0.007;
     double envIn[2] {}, envOut[2] {};
     int xfade = 36, dMin = 44, dLead = 44;
     int xfPos = -1, xfLen = 36;

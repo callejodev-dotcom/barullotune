@@ -340,8 +340,8 @@ int main (int argc, char** argv)
                      s.inC, s.outC, s.maxC, s.frames, s.wrong, lat, 1000.0 * lat / SR);
         const std::string M (qn);
         metric (M + ".robot.cents", s.outC); metric (M + ".robot.fora", s.wrong); metric (M + ".latencia.ms", 1000.0 * lat / SR);
-        check (q == 0 ? "directo robot: menos de 8 cents de media" : q == 1 ? "preciso robot: menos de 3 cents de media" : "estudio robot: menos de 3 cents de media",
-               s.outC < (q == 0 ? 8.0 : 3.0) && s.wrong < s.frames / 30 + 2);
+        check (q == 0 ? "directo robot: menos de 3 cents de media" : q == 1 ? "preciso robot: menos de 3 cents de media" : "estudio robot: menos de 3 cents de media",
+               s.outC < 3.0 && s.wrong < s.frames / 30 + 2);
         if (q == 0) check ("directo: latencia de menos de 1 ms", lat < SR * 0.001);
         if (q == 1) check ("preciso: latencia de menos de 13 ms", lat < SR * 0.013);
 
@@ -464,8 +464,8 @@ int main (int argc, char** argv)
             const double rin = std::sqrt (ain / std::max (1, cnt)) * 100.0, rout = std::sqrt (acc / std::max (1, cnt)) * 100.0;
             std::printf ("voz con vibrato rápido e tremor, robot: %.1f c -> %.1f c da nota\n", rin, rout);
             metric (M + ".tremor.cents", rout);
-            const double lim = q == 0 ? 4.0 : 1.5;   // antes do ton deslizante: directo 6,0 c, preciso 1,8 c
-            check (q == 0 ? "directo: vibrato rápido aplanado (menos de 4 c)" : q == 1 ? "preciso: vibrato rápido aplanado (menos de 1,5 c)" : "estudio: vibrato rápido aplanado (menos de 1,5 c)", rout < lim);
+            const double lim = q == 0 ? 2.5 : 1.5;   // antes do ton deslizante: directo 6,0 c, preciso 1,8 c
+            check (q == 0 ? "directo: vibrato rápido aplanado (menos de 2,5 c)" : q == 1 ? "preciso: vibrato rápido aplanado (menos de 1,5 c)" : "estudio: vibrato rápido aplanado (menos de 1,5 c)", rout < lim);
         }
 
         // glisandos (efecto robot, cromática): a saída ten que ir en escaleira detrás da voz,

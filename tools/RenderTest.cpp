@@ -1084,6 +1084,44 @@ int main (int argc, char** argv)
         check ("presets: Robot aplícase e gárdase", ok1 && b.getCurrentProgram() == robotIdx);
     }
 
+    // A/B, presets propios e desfacer
+    {
+        TuneProcessor p;
+        auto vel = [&] { return p.params.getRawParameterValue ("velocidade")->load(); };
+        setP (p, "velocidade", 10);
+        p.abSwitch();                                  // B: copia de A
+        const bool b1 = std::abs (vel() - 10) < 0.01f && p.abCurrent() == 1;
+        setP (p, "velocidade", 300);
+        p.abSwitch();                                  // volve a A
+        const bool a1 = std::abs (vel() - 10) < 0.01f && p.abCurrent() == 0;
+        p.abSwitch();                                  // B outra vez
+        const bool b2 = std::abs (vel() - 300) < 0.01f;
+        check ("A/B: cada lado garda os seus axustes", b1 && a1 && b2);
+
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("barullo_presets_proba");
+        dir.deleteRecursively();
+        p.setPresetFolder (dir);
+        setP (p, "velocidade", 77); setP (p, "harm1", 1); setP (p, "vibgen_fondo", 25);
+        const bool saved = p.saveUserPreset ("Proba: voz/1");
+        setP (p, "velocidade", 5); setP (p, "harm1", 0); setP (p, "vibgen_fondo", 0);
+        const auto list = p.userPresets();
+        const bool loaded = list.size() == 1 && p.loadUserPreset (list[0]);
+        const bool same = std::abs (vel() - 77) < 0.01f && p.params.getRawParameterValue ("harm1")->load() > 0.5f && std::abs (p.params.getRawParameterValue ("vibgen_fondo")->load() - 25) < 0.01f;
+        std::printf ("presets propios: gardado %d, na carpeta %d (%s), cargado %d\n", (int) saved, list.size(), list.isEmpty() ? "" : list[0].getFileName().toRawUTF8(), (int) loaded);
+        check ("presets propios: gardar e cargar", saved && loaded && same);
+        dir.deleteRecursively();
+
+        TuneProcessor u;
+        setP (u, "velocidade", 20); u.params.copyState(); u.undo.beginNewTransaction();
+        setP (u, "velocidade", 123); u.params.copyState(); u.undo.beginNewTransaction();
+        u.undo.undo();
+        const float afterUndo = u.params.getRawParameterValue ("velocidade")->load();
+        u.undo.redo();
+        const float afterRedo = u.params.getRawParameterValue ("velocidade")->load();
+        std::printf ("desfacer: %.0f -> desfacer %.0f -> refacer %.0f\n", 123.0, afterUndo, afterRedo);
+        check ("desfacer e refacer", std::abs (afterUndo - 20) < 0.01f && std::abs (afterRedo - 123) < 0.01f);
+    }
+
     // estado
     {
         TuneProcessor a;

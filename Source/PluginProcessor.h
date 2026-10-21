@@ -154,7 +154,20 @@ public:
     static constexpr int stateVersion = 2;
     static void migrateState (juce::ValueTree& state, int fromVersion);
 
+    juce::UndoManager undo;   // desfacer e refacer os cambios de parámetros (declárase antes de params)
     juce::AudioProcessorValueTreeState params;
+
+    // A/B: dous xogos de axustes para comparar (todo agás o bypass e comparar)
+    int abCurrent() const { return abSlot; }
+    void abSwitch();   // garda o actual no seu lado e carga o outro (se está baleiro, copia o actual)
+    void abCopy();     // copia o actual ao outro lado
+
+    // presets propios: ficheiros .btpreset (XML) nunha carpeta (por defecto, Documentos/Barullo Tune/Presets)
+    juce::File presetFolder() const;
+    void setPresetFolder (const juce::File& f) { userFolder = f; }
+    juce::Array<juce::File> userPresets() const;
+    bool saveUserPreset (const juce::String& name);
+    bool loadUserPreset (const juce::File& file);
 
     // armonías
     static constexpr int numHarmonies = tune::Settings::maxHarmonies;
@@ -219,6 +232,11 @@ private:
     float levelAcc = 0, outAcc = 0;
     std::atomic<int> latencyNow { 0 };
     int currentPreset = 0;
+    int abSlot = 0;
+    juce::ValueTree abState[2];
+    juce::File userFolder;
+    juce::ValueTree snapshotParams() const;
+    void applyParams (const juce::ValueTree& snap);
 public:
     std::atomic<float> uiScale { 1.0f };   // tamaño da xanela (gárdase co proxecto)
 private:

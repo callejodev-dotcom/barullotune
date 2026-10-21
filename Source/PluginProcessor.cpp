@@ -115,7 +115,7 @@ TuneProcessor::TuneProcessor()
                         .withInput ("Entrada", juce::AudioChannelSet::stereo(), true)
                         .withOutput ("Saída", juce::AudioChannelSet::stereo(), true)
                         .withInput ("Acompañamento", juce::AudioChannelSet::stereo(), false)),   // para detectar a tonalidade coa base
-      params (*this, nullptr, "BarulloTune", layout())
+      params (*this, &undo, "BarulloTune", layout())
 {
     pModo = params.getRawParameterValue ("modo");
     pTonica = params.getRawParameterValue ("tonica");
@@ -391,6 +391,78 @@ void TuneProcessor::chromaFrame()
     const float dt = (float) chromaHop / (float) getSampleRate();
     for (int i = 0; i < 12; ++i) chroma[(size_t) i] = chroma[(size_t) i].load() + c[i] / sum * dt;
     chromaHeard = chromaHeard.load() + dt;
+}
+
+// ---- A/B e presets propios ----
+// Unha foto de todos os parámetros (agás bypass e comparar): <PARAMS><P id=.. v=../>…
+juce::ValueTree TuneProcessor::snapshotParams() const
+{
+    juce::ValueTree t ("PARAMS");
+    for (auto* prm : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+        {
+            if (rp->paramID == "bypass" || rp->paramID == "comparar") continue;
+            juce::ValueTree c ("P");
+            c.setProperty ("id", rp->paramID, nullptr);
+            c.setProperty ("v", rp->convertFrom0to1 (rp->getValue()), nullptr);
+            t.appendChild (c, nullptr);
+        }
+    return t;
+}
+
+void TuneProcessor::applyParams (const juce::ValueTree& snap)
+{
+    undo.beginNewTransaction();
+    for (auto c : snap)
+        if (auto* rp = params.getParameter (c.getProperty ("id").toString()))
+            setParamPlain (rp->paramID, (float) (double) c.getProperty ("v"));
+}
+
+void TuneProcessor::abSwitch()
+{
+    abState[abSlot] = snapshotParams();
+    abSlot = 1 - abSlot;
+    if (! abState[abSlot].isValid()) abState[abSlot] = abState[1 - abSlot].createCopy();
+    applyParams (abState[abSlot]);
+}
+
+void TuneProcessor::abCopy()
+{
+    abState[1 - abSlot] = snapshotParams();
+}
+
+juce::File TuneProcessor::presetFolder() const
+{
+    if (userFolder != juce::File()) return userFolder;
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Barullo Tune").getChildFile ("Presets");
+}
+
+juce::Array<juce::File> TuneProcessor::userPresets() const
+{
+    auto files = presetFolder().findChildFiles (juce::File::findFiles, false, "*.btpreset");
+    files.sort();
+    return files;
+}
+
+bool TuneProcessor::saveUserPreset (const juce::String& name)
+{
+    const auto clean = juce::File::createLegalFileName (name.trim());
+    if (clean.isEmpty()) return false;
+    auto dir = presetFolder();
+    if (! dir.createDirectory()) return false;
+    auto snap = snapshotParams();
+    snap.setProperty ("version", stateVersion, nullptr);
+    snap.setProperty ("plugin", BARULLO_VERSION, nullptr);
+    if (auto xml = snap.createXml()) return xml->writeTo (dir.getChildFile (clean + ".btpreset"));
+    return false;
+}
+
+bool TuneProcessor::loadUserPreset (const juce::File& file)
+{
+    auto xml = juce::XmlDocument::parse (file);
+    if (xml == nullptr || ! xml->hasTagName ("PARAMS")) return false;
+    applyParams (juce::ValueTree::fromXml (*xml));
+    return true;
 }
 
 uint16_t TuneProcessor::effectiveMask() const

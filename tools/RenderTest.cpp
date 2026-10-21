@@ -446,6 +446,39 @@ int main (int argc, char** argv)
         check ("formantes +4: mesma nota e timbre máis brillante", s.outC < 4.0 && c1 > c0 * 1.12);
     }
 
+    // MIDI nota + pitch bend: a roda arriba do todo sobe a voz 2 semitonos
+    {
+        std::vector<std::pair<int, int>> ev;
+        double t = 0;
+        for (auto& m : melody()) { const int nn = (int) m.midi; ev.push_back ({ (int) (t * SR), nn }); ev.push_back ({ (int) ((t + m.dur) * SR) - 48, -nn }); t += m.dur; }
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        setP (p, "modo", 2); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
+        p.prepareToPlay (SR, 512);
+        const int lat = p.getLatencySamples(), total = (int) voice.size() + lat;
+        juce::AudioBuffer<float> out (2, total), buf (2, 512);
+        size_t k = 0;
+        for (int pos = 0; pos < total; pos += 512)
+        {
+            const int nn = juce::jmin (512, total - pos);
+            buf.setSize (2, nn, false, false, true);
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < nn; ++i) buf.setSample (c, i, pos + i < (int) voice.size() ? voice[(size_t) (pos + i)] : 0.0f);
+            juce::MidiBuffer midi;
+            if (pos == 0) midi.addEvent (juce::MidiMessage::pitchWheel (1, 16383), 0);
+            while (k < ev.size() && ev[k].first < pos + nn)
+            {
+                const int at = juce::jmax (0, ev[k].first - pos), note = ev[k].second;
+                midi.addEvent (note > 0 ? juce::MidiMessage::noteOn (1, note, (juce::uint8) 100) : juce::MidiMessage::noteOff (1, -note), at);
+                ++k;
+            }
+            p.processBlock (buf, midi);
+            for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, buf, c, 0, nn);
+        }
+        auto sb = evaluate (out, lat, truth, 2);
+        std::printf ("MIDI + bend: saída %.1f c, %d fóra de nota\n", sb.outC, sb.wrong);
+        check ("pitch bend en MIDI nota: +2 semitonos", sb.outC < 8.0 && sb.wrong < sb.frames / 20 + 2);
+    }
+
     // directo transpondo +5: a nota sobe pero o timbre non (sen voz de esquío).
     // Espectro medio en terzos de oitava (200 Hz–6 kHz), comparado co da voz orixinal.
     {

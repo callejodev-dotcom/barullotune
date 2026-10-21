@@ -287,6 +287,7 @@ void TuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             const auto m = (*it).getMessage();
             if (m.isNoteOn()) engine.noteOn (m.getNoteNumber());
             else if (m.isNoteOff()) engine.noteOff (m.getNoteNumber());
+            else if (m.isPitchWheel()) engine.setPitchBend (m.getPitchWheelValue());
             else if (m.isAllNotesOff() || m.isAllSoundOff()) engine.allNotesOff();
         }
         // estéreo de verdade: o ton detéctase no centro e as dúas canles corríxense igual

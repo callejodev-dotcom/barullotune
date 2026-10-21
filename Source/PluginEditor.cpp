@@ -516,7 +516,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     const char* modeTips[3] = {
         "Leva a voz á nota máis próxima da escala.",
         "As notas que toques no teclado MIDI fan de escala, en calquera oitava. Sen notas tocadas, usa a escala.",
-        "A voz vai á nota exacta que toques no teclado MIDI, na oitava máis próxima. Sen notas tocadas, usa a escala." };
+        "A voz vai á nota exacta que toques no teclado MIDI, na oitava máis próxima; a roda de pitch bend dóbraa ±2 semitonos. Sen notas tocadas, usa a escala." };
     setupSegment (modeBtn, 3, "modo", modes, modeTips);
     const char* cals[3] = { "Directo", "Preciso", "Estudio" };
     const char* calTips[3] = {

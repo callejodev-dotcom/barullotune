@@ -339,6 +339,8 @@ public:
     double amount = 1.0;       // 0..1 canto se corrixe
     int mode = ScaleMode;
     double transpose = 0.0;    // semitonos
+    double bendRange = 2.0;    // MIDI nota: a roda de pitch bend dobra a nota ±isto
+    void setPitchBend (int value14) { bend = (value14 - 8192) / 8192.0; }
     double formant = 0.0;      // semitonos (en Directo e Preciso, coa corrección de formantes)
 
     void prepare (double sampleRate)
@@ -454,6 +456,9 @@ private:
         return ((scale | freeMask) >> deg) & 1;
     }
 
+    // pitch bend: só no modo MIDI nota e mentres hai unha nota tocada
+    double bendNow() const { return (mode == MidiNote && lastNote >= 0) ? bend * bendRange : 0.0; }
+
     bool isFree (int note) const
     {
         if ((mode == MidiScale || mode == MidiNote) && heldMask != 0) return false;
@@ -473,9 +478,11 @@ private:
         // ancho ou unha voz a medio camiño entre dúas notas non faga saltar o destino
         // ton para decidir a nota: suavizado 40 ms
         const double dtd = detector.hopSeconds() * sr;
-        if (! was) { mSmooth = m; candidate = -1; candHeld = 0; }
+        const double prevMd = mSmooth;
+        if (! was) { mSmooth = m; candidate = -1; candHeld = 0; decSlope = 0; }
         else mSmooth += (m - mSmooth) * decisionAlpha;
         const double md = mSmooth;
+        if (was) decSlope += ((md - prevMd) / detector.hopSeconds() - decSlope) * 0.3;   // semitonos/s
 
         int t = target;
         if (mode == MidiNote && lastNote >= 0)
@@ -500,7 +507,9 @@ private:
             {
                 if (best != candidate) { candidate = best; candHeld = 0; }
                 candHeld += dtd;
-                if (! was || t < 0 || ! allowed (t) || std::abs (md - t) > 0.9 || candHeld >= 0.025 * sr) t = best;
+                // se a voz vai claramente cara á nota nova (máis de 5 semitonos/s), acéptase xa
+                const bool movingThere = std::abs (decSlope) > 5.0 && (best - t) * decSlope > 0 && std::abs (md - t) > 0.5;
+                if (! was || t < 0 || ! allowed (t) || std::abs (md - t) > 0.9 || movingThere || candHeld >= 0.025 * sr) t = best;
             }
             else candidate = -1;
         }
@@ -517,6 +526,7 @@ private:
         bool active = false; int lastTarget = -1;
         double tS = 0, cS = 0, vibRamp = 0, tolTimer = 0;
         double ic1 = 0, ic2 = 0;   // filtro de estado (TPT) do vibrato
+        double prevCentre = 0, slope = 0;   // pendente do centro da voz (semitonos/s)
     };
 
     double alphaFor (double ms, double dt) const { return ms <= 0.0 ? 1.0 : 1.0 - std::exp (-dt / (ms * 0.001 * sr)); }
@@ -542,11 +552,12 @@ private:
             // comezo dunha nota: xa afinada
             st.active = true; st.tS = tgt; st.vibRamp = 0; st.tolTimer = 0;
             st.ic1 = 0; st.ic2 = m;
+            st.prevCentre = m; st.slope = 0;
             const double err = st.tS - m;
             st.cS = (free || std::abs (err) * 100.0 < tolCents) ? 0.0 : err * amount;
             st.lastTarget = tgt;
-            outMidi = m + st.cS + transpose;
-            return st.cS + transpose;
+            outMidi = m + st.cS + transpose + bendNow();
+            return st.cS + transpose + bendNow();
         }
         if (tgt != st.lastTarget) st.vibRamp = 0;   // nota nova: o vibrato volve entrar amodo
         st.lastTarget = tgt;
@@ -555,15 +566,23 @@ private:
         const double vib = clampd (vibratoBand (st, m, dt), -1.5, 1.5) * st.vibRamp;
         const double centre = m - vib;
         const double err = st.tS - centre;
+        // portamentos: mentres a voz vai dunha nota a outra (máis de 4 semitonos/s), a
+        // corrección sóltaa en proporción á «transición», para non arrastrala cara á nota de
+        // antes. Con transición 0 (robot) non cambia nada: escaleira seca.
+        const double inst = (centre - st.prevCentre) * sr / std::max (1.0, dt);
+        st.prevCentre = centre;
+        st.slope += (clampd (inst, -60.0, 60.0) - st.slope) * alphaFor (30.0, dt);
+        const double glide = clampd ((std::abs (st.slope) - 4.0) / 8.0, 0.0, 1.0);
+        const double relax = clampd (transitionMs / 60.0, 0.0, 1.0) * glide;
         double want = 0.0;
         if (! free)
         {
             const bool outside = std::abs (err) * 100.0 >= tolCents;
             st.tolTimer = outside ? st.tolTimer + dt : 0.0;
-            if (outside && st.tolTimer >= tolMs * 0.001 * sr) want = err * amount;
+            if (outside && st.tolTimer >= tolMs * 0.001 * sr) want = err * amount * (1.0 - relax);
         }
         st.cS += (want - st.cS) * alphaFor (speedMs, dt);
-        outMidi = centre + st.cS + vibrato * vib + transpose;
+        outMidi = centre + st.cS + vibrato * vib + transpose + bendNow();
         return outMidi - m;
     }
 
@@ -990,9 +1009,10 @@ private:
     int xfPos = -1, xfLen = 36;
 
     // común
-    double curP = 200, mSmooth = 0, decisionAlpha = 0.1, candHeld = 0;
+    double curP = 200, mSmooth = 0, decisionAlpha = 0.1, candHeld = 0, decSlope = 0;
     int candidate = -1;
     int target = -1, lastNote = -1;
+    double bend = 0.0;
     uint8_t held[128] {};
     uint16_t heldMask = 0;
 };

@@ -101,7 +101,7 @@ public:
 
     const juce::String getName() const override { return "Barullo Tune"; }
     bool acceptsMidi() const override { return true; }
-    bool producesMidi() const override { return false; }
+    bool producesMidi() const override { return true; }   // as notas cantadas (se se pide)
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
@@ -196,7 +196,9 @@ private:
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
     std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman, *pPrincipal, *pHarmMode;
-    std::atomic<float>* pVgDepth, *pVgRate, *pVgDelay, *pVgVar, *pVgTrem, *pAfin;
+    std::atomic<float>* pVgDepth, *pVgRate, *pVgDelay, *pVgVar, *pVgTrem, *pAfin, *pBendRange, *pMidiOut;
+    juce::MidiBuffer midiOutBuf;
+    int midiOutNote = -1, midiOutSilence = 0, midiOutHold = 1920, midiOutPending = -1, midiOutPendingAge = 0, midiOutMinDur = 1440;
     std::array<std::atomic<float>*, 12> pCents {};
     struct HarmParams { std::atomic<float>* on, *interval, *level, *pan, *detune, *delay, *formant; };
     std::array<HarmParams, numHarmonies> harmP {};

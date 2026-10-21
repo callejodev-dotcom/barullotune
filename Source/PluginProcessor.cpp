@@ -63,6 +63,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "comparar", 1 }, U ("Comparar (voz orixinal)"), false));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, U ("Bypass"), false));
 
+    // MIDI
+    l.add (std::make_unique<AudioParameterInt> (ParameterID { "bend_rango", 1 }, U ("Rango do pitch bend"), 1, 24, 2,
+        AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return String (v) + " st"; })));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { "midi_saida", 1 }, U ("MIDI: notas cantadas"), false));
+
     // vibrato xerado
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibgen_fondo", 1 }, U ("Vibrato xerado: fondo"), NormalisableRange<float> (0.0f, 100.0f, 0.1f, 0.6f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " c"; })));
@@ -134,6 +139,8 @@ TuneProcessor::TuneProcessor()
     pVgVar = params.getRawParameterValue ("vibgen_variacion");
     pVgTrem = params.getRawParameterValue ("vibgen_tremolo");
     pAfin = params.getRawParameterValue ("afinacion");
+    pBendRange = params.getRawParameterValue ("bend_rango");
+    pMidiOut = params.getRawParameterValue ("midi_saida");
     for (int i = 0; i < 12; ++i) pCents[(size_t) i] = params.getRawParameterValue ("cents" + juce::String (i));
     pHarmMode = params.getRawParameterValue ("armonia_modo");
     for (int h = 0; h < numHarmonies; ++h)
@@ -221,6 +228,9 @@ void TuneProcessor::prepareToPlay (double sr, int)
     gainSm.reset (sr, 0.03); gainSm.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVol->load()));
     bypassSm.reset (sr, 0.02); bypassSm.setCurrentAndTargetValue (pBypass->load() > 0.5f ? 1.0f : 0.0f);
     switchGain = 1.0f; switchState = 0; switchStep = (float) (1.0 / (0.005 * sr));
+    midiOutNote = -1; midiOutSilence = 0; midiOutHold = (int) (0.04 * sr);
+    midiOutPending = -1; midiOutPendingAge = 0; midiOutMinDur = (int) (0.03 * sr);
+    midiOutBuf.ensureSize (2048);
     leadSm.reset (sr, 0.03); leadSm.setCurrentAndTargetValue (leadGainTarget());
     harmSm.reset (sr, 0.03); harmSm.setCurrentAndTargetValue (pComp->load() > 0.5f ? 0.0f : 1.0f);
     for (int h = 0; h < numHarmonies; ++h)
@@ -454,6 +464,7 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     engine.humanize = pHuman->load() * 0.01;
     engine.harmonyMode = juce::jlimit (0, 1, (int) pHarmMode->load());
     tuningCents (engine.tuneCents);
+    engine.bendRange = pBendRange->load();
     engine.vibDepth = pVgDepth->load();
     engine.vibRate = pVgRate->load();
     engine.vibDelayMs = pVgDelay->load();
@@ -482,6 +493,8 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     gainSm.setTargetValue (juce::Decibels::decibelsToGain (pVol->load()));
     bypassSm.setTargetValue (hostBypass || pBypass->load() > 0.5f ? 1.0f : 0.0f);
 
+    const bool midiOutOn = pMidiOut->load() > 0.5f;
+    midiOutBuf.clear();
     auto it = midi.cbegin();
     const auto end = midi.cend();
     const int dsz = (int) dry[0].size();
@@ -492,9 +505,9 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         for (; it != end && (*it).samplePosition <= i; ++it)
         {
             const auto m = (*it).getMessage();
-            if (m.isNoteOn()) engine.noteOn (m.getNoteNumber());
+            if (m.isNoteOn()) engine.noteOn (m.getNoteNumber(), m.getChannel());
             else if (m.isNoteOff()) engine.noteOff (m.getNoteNumber());
-            else if (m.isPitchWheel()) engine.setPitchBend (m.getPitchWheelValue());
+            else if (m.isPitchWheel()) engine.setPitchBend (m.getPitchWheelValue(), m.getChannel());
             else if (m.isAllNotesOff() || m.isAllSoundOff()) engine.allNotesOff();
         }
         // estéreo de verdade: o ton detéctase no centro e as dúas canles corríxense igual
@@ -548,15 +561,43 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         else if (switchState > 0 && (switchGain += switchStep) >= 1.0f) { switchGain = 1.0f; switchState = 0; }
 
         levelAcc = juce::jmax (levelAcc * 0.9995f, peakIn);
+        // MIDI de saída: a nota á que vai a voz (nota nova = apagar a anterior e acender esta;
+        // máis de 40 ms sen voz = apagar), coa velocidade segundo o nivel da voz. Unha nota
+        // ten que durar 30 ms para saír: así as notas de paso dun glisando non saen
+        if (midiOutOn)
+        {
+            const int t = engine.isVoiced() ? engine.targetNote() : -1;
+            if (t >= 0) midiOutSilence = 0; else ++midiOutSilence;
+            // (os 30 ms só contan mentres a voz está de verdade na nota, a menos de medio semitono)
+            if (t != midiOutPending) { midiOutPending = t; midiOutPendingAge = 0; }
+            else if (t >= 0 && std::abs (engine.inputMidi() - t) < 0.5) ++midiOutPendingAge;
+            if (t >= 0 && t != midiOutNote && midiOutPendingAge >= midiOutMinDur)
+            {
+                if (midiOutNote >= 0) midiOutBuf.addEvent (juce::MidiMessage::noteOff (1, midiOutNote), i);
+                const float db = juce::Decibels::gainToDecibels (levelAcc, -60.0f);
+                const int vel = juce::jlimit (1, 127, juce::roundToInt (30.0f + (db + 40.0f) / 40.0f * 97.0f));
+                midiOutBuf.addEvent (juce::MidiMessage::noteOn (1, t, (juce::uint8) vel), i);
+                midiOutNote = t;
+            }
+            else if (t < 0 && midiOutNote >= 0 && midiOutSilence > midiOutHold)
+            {
+                midiOutBuf.addEvent (juce::MidiMessage::noteOff (1, midiOutNote), i);
+                midiOutNote = -1;
+            }
+        }
         outAcc = juce::jmax (outAcc * 0.9995f, peakOut);
         if (++frameCount >= 256) { frameCount = 0; pushFrame(); }
     }
     for (; it != end; ++it)
     {
         const auto m = (*it).getMessage();
-        if (m.isNoteOn()) engine.noteOn (m.getNoteNumber());
+        if (m.isNoteOn()) engine.noteOn (m.getNoteNumber(), m.getChannel());
         else if (m.isNoteOff()) engine.noteOff (m.getNoteNumber());
+        else if (m.isPitchWheel()) engine.setPitchBend (m.getPitchWheelValue(), m.getChannel());
     }
+    // MIDI de saída: as notas cantadas substitúen o que entrou
+    if (midiOutOn) midi.swapWith (midiOutBuf);
+    else if (midiOutNote >= 0) { midi.addEvent (juce::MidiMessage::noteOff (1, midiOutNote), 0); midiOutNote = -1; }
 
     nowIn = (float) engine.inputMidi(); nowOut = (float) engine.outputMidi();
     nowHz = (float) engine.detectedHz(); nowCents = (float) engine.correctionCents();

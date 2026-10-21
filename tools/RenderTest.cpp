@@ -1111,6 +1111,70 @@ int main (int argc, char** argv)
         check ("estados rotos: sen problemas", true);
     }
 
+    // MIDI de saída: a melodía (Do maior) dá as súas 12 notas, na orde
+    {
+        TuneProcessor p;
+        p.setPlayConfigDetails (2, 2, SR, 512);
+        setP (p, "midi_saida", 1); major (p);
+        p.prepareToPlay (SR, 512);
+        juce::AudioBuffer<float> buf (2, 512);
+        std::vector<int> ons; int offs = 0, lastOn = -1; bool overlap = false;
+        for (int pos = 0; pos + 512 <= (int) voice.size(); pos += 512)
+        {
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, voice[(size_t) (pos + i)]);
+            juce::MidiBuffer m; p.processBlock (buf, m);
+            for (const auto md : m)
+            {
+                const auto msg = md.getMessage();
+                if (msg.isNoteOn()) { if (lastOn >= 0) overlap = true; ons.push_back (msg.getNoteNumber()); lastOn = msg.getNoteNumber(); }
+                else if (msg.isNoteOff()) { ++offs; if (msg.getNoteNumber() == lastOn) lastOn = -1; }
+            }
+        }
+        std::vector<int> want; for (auto& nt : melody()) want.push_back ((int) nt.midi);
+        // as notas distintas seguidas (un glisando pode dar unha nota de paso curta)
+        size_t k = 0; int extra = 0;
+        for (int n : ons) { if (k < want.size() && n == want[k]) ++k; else ++extra; }
+        juce::String seq; for (int n : ons) seq << n << " ";
+        std::printf ("MIDI de saída: %d notas (%s), %d da melodía na orde, %d de máis, %d apagadas\n", (int) ons.size(), seq.toRawUTF8(), (int) k, extra, offs);
+        check ("MIDI de saída: as notas cantadas, unha tras outra", k == want.size() && extra == 0 && ! overlap);
+    }
+
+    // MPE: a nota na canle 3 dóbraa o bend da canle 3 (rango 4 st), non o da 5
+    {
+        auto bendRun = [&] (int bendChannel)
+        {
+            TuneProcessor p;
+            p.setPlayConfigDetails (1, 1, SR, 512);
+            setP (p, "modo", 2); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); setP (p, "bend_rango", 4); setP (p, "calidade", 1);
+            p.prepareToPlay (SR, 512);
+            std::vector<float> e4 ((size_t) (1.0 * SR)); double ph = 0;
+            for (size_t i = 0; i < e4.size(); ++i)
+            {
+                const double f0 = 440.0 * std::pow (2.0, (60.2 - 69) / 12.0); ph += f0 / SR; double sm = 0;
+                for (int h = 1; h <= 30; ++h) sm += envAt (VA, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                e4[i] = (float) (0.1 * sm * std::min (1.0, (double) i / (0.03 * SR)));
+            }
+            const int lt = p.getLatencySamples();
+            juce::AudioBuffer<float> buf (1, 512), out (1, (int) e4.size() + lt);
+            for (int pos = 0; pos < (int) e4.size(); pos += 512)
+            {
+                const int nn = juce::jmin (512, (int) e4.size() - pos);
+                buf.setSize (1, nn, false, false, true);
+                for (int i = 0; i < nn; ++i) buf.setSample (0, i, e4[(size_t) (pos + i)]);
+                juce::MidiBuffer m;
+                if (pos == 0) { m.addEvent (juce::MidiMessage::noteOn (3, 60, (juce::uint8) 100), 0); m.addEvent (juce::MidiMessage::pitchWheel (bendChannel, 16383), 0); }
+                p.processBlock (buf, m);
+                out.copyFrom (0, pos, buf, 0, 0, nn);
+            }
+            double acc = 0; int cnt = 0;
+            for (int64_t c = (int64_t) (0.3 * SR); c < (int64_t) (0.9 * SR); c += 240) { const double mo = measure (out.getReadPointer (0), out.getNumSamples(), c + lt); if (mo > 0) { acc += mo; ++cnt; } }
+            return acc / std::max (1, cnt);
+        };
+        const double own = bendRun (3), other = bendRun (5);
+        std::printf ("MPE: nota Do na canle 3, bend arriba na canle 3 -> %.2f, na canle 5 -> %.2f\n", own, other);
+        check ("MPE: o bend da canle da nota, co rango escollido", std::abs (own - 64.0) < 0.1 && std::abs (other - 60.0) < 0.1);
+    }
+
     // escalas e afinación
     {
         // estado da versión 1 con «Personalizada» (daquela o 9): segue sendo Personalizada

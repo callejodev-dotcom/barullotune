@@ -33,7 +33,7 @@ public:
     Engine (const Engine&) = delete;
     Engine& operator= (const Engine&) = delete;
 
-    void setPitchBend (int value14) { an.midi.setPitchBend (value14); }
+    void setPitchBend (int value14, int channel = 1) { an.midi.setPitchBend (value14, channel); }
 
     void prepare (double sampleRate)
     {
@@ -68,7 +68,7 @@ public:
         for (auto& w : harmWasOn) w = false;
     }
 
-    void noteOn (int note) { an.midi.noteOn (note); }
+    void noteOn (int note, int channel = 1) { an.midi.noteOn (note, channel); }
     void noteOff (int note) { an.midi.noteOff (note); }
     void allNotesOff() { an.midi.allNotesOff(); }
 

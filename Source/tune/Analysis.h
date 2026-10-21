@@ -82,7 +82,7 @@ public:
     bool isFree (int note) const { return noteFree (set, midi, note); }
 
     // pitch bend: só no modo MIDI nota e mentres hai unha nota tocada
-    double bendNow() const { return (set.mode == Settings::MidiNote && midi.lastNote >= 0) ? midi.bend * set.bendRange : 0.0; }
+    double bendNow() const { return (set.mode == Settings::MidiNote && midi.lastNote >= 0) ? midi.bend() * set.bendRange : 0.0; }
 
     // ============================================================ marcas de ciclo
     struct Mark { double pos; double period; bool voiced; int target; };

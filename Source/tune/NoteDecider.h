@@ -10,15 +10,21 @@
 
 namespace tune {
 
-// teclas MIDI tocadas
+// teclas MIDI tocadas. O pitch bend lévase por canle (MPE: cada nota na súa canle, e a
+// canle 1 é a mestra, que dobra todas); sen MPE todo vai pola canle 1 e é coma sempre.
 struct MidiState
 {
     uint8_t held[128] {};
+    uint8_t noteChannel[128] {};
     uint16_t heldMask = 0;
     int lastNote = -1;
-    double bend = 0.0;   // −1..1
+    double bendCh[17] {};   // −1..1, por canle (1..16)
 
-    void noteOn (int note) { if (note >= 0 && note < 128) { held[note] = 1; lastNote = note; recompute(); } }
+    void noteOn (int note, int channel = 1)
+    {
+        if (note < 0 || note >= 128) return;
+        held[note] = 1; noteChannel[note] = (uint8_t) std::max (1, std::min (16, channel)); lastNote = note; recompute();
+    }
     void noteOff (int note)
     {
         if (note < 0 || note >= 128) return;
@@ -26,7 +32,14 @@ struct MidiState
         if (note == lastNote) { lastNote = -1; for (int i = 127; i >= 0; --i) if (held[i]) { lastNote = i; break; } }
     }
     void allNotesOff() { for (auto& h : held) h = 0; heldMask = 0; lastNote = -1; }
-    void setPitchBend (int value14) { bend = (value14 - 8192) / 8192.0; }
+    void setPitchBend (int value14, int channel = 1) { bendCh[std::max (1, std::min (16, channel))] = (value14 - 8192) / 8192.0; }
+    // o bend da última nota: o da súa canle e, se non é a mestra, tamén o da mestra
+    double bend() const
+    {
+        if (lastNote < 0) return bendCh[1];
+        const int ch = noteChannel[lastNote];
+        return bendCh[ch] + (ch != 1 ? bendCh[1] : 0.0);
+    }
 
 private:
     void recompute()

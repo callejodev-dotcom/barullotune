@@ -382,6 +382,40 @@ int main (int argc, char** argv)
             check ("Natural corrixe a inseguridade (non a toma por vibrato)", sout < 0.5 * sin_);
         }
 
+        // voz «de verdade» nunha nota: vibrato rápido e ancho (6,2 Hz, ±45 c), tremor de
+        // período ciclo a ciclo (0,6 %) e de nivel. En robot (vibrato 0 %) a saída ten que
+        // quedar plana na nota: así se ve se o ton se mide ben no punto que se le
+        {
+            std::vector<float> vr ((size_t) (2.4 * SR));
+            std::mt19937 rr (5); std::normal_distribution<double> gn (0, 1);
+            double ph = 0, jit = 0, shim = 1.0;
+            for (size_t i = 0; i < vr.size(); ++i)
+            {
+                const double tt = (double) i / SR;
+                const double mm = 64.0 + 0.45 * std::sin (2 * juce::MathConstants<double>::pi * 6.2 * tt);
+                const double f0 = 440.0 * std::pow (2.0, (mm - 69) / 12.0) * (1.0 + jit);
+                const double before = ph;
+                ph += f0 / SR;
+                if (std::floor (ph) != std::floor (before)) { jit = 0.006 * gn (rr); shim = 1.0 + 0.08 * gn (rr); }   // ciclo novo
+                double sm = 0;
+                for (int h = 1; h <= 30; ++h) sm += envAt (VE, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                vr[i] = (float) (0.1 * shim * sm * std::min (1.0, tt / 0.03));
+            }
+            int lr = 0;
+            auto ro = run (vr, 512, 2, [&] (TuneProcessor& p) { setq (p); setP (p, "escala", 0); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0); }, lr);
+            double acc = 0, ain = 0; int cnt = 0;
+            for (int64_t c = (int64_t) (0.4 * SR); c < (int64_t) (2.2 * SR); c += 240)
+            {
+                const double mo = measure (ro.getReadPointer (0), ro.getNumSamples(), c + lr);
+                const double mi = measure (vr.data(), (int64_t) vr.size(), c);
+                if (mo > 0 && mi > 0) { acc += (mo - 64.0) * (mo - 64.0); ain += (mi - 64.0) * (mi - 64.0); ++cnt; }
+            }
+            const double rin = std::sqrt (ain / std::max (1, cnt)) * 100.0, rout = std::sqrt (acc / std::max (1, cnt)) * 100.0;
+            std::printf ("voz con vibrato rápido e tremor, robot: %.1f c -> %.1f c da nota\n", rin, rout);
+            const double lim = q == 0 ? 4.0 : 1.5;   // antes do ton deslizante: directo 6,0 c, preciso 1,8 c
+            check (q == 0 ? "directo: vibrato rápido aplanado (menos de 4 c)" : q == 1 ? "preciso: vibrato rápido aplanado (menos de 1,5 c)" : "estudio: vibrato rápido aplanado (menos de 1,5 c)", rout < lim);
+        }
+
         // tolerancia 40 cents e notas libres: case non se toca
         {
             auto tl = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "tolerancia", 40); }, lat);

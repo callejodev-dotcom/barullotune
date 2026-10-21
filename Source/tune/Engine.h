@@ -359,6 +359,7 @@ public:
         ffix.prepare (sr);
         ffixAlpha = 1.0 - std::exp (-1.0 / (0.02 * sr));
         dirAlpha = 1.0 - std::exp (-1.0 / (0.0015 * sr));
+        lookAhead = 0.0015 * sr;   // o atraso dese suavizado
         configure (quality, range);
     }
 
@@ -402,6 +403,7 @@ public:
         // directo
         ffix.reset();
         rp = -(double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; cycleOk = false; directState = {};
+        slN = 0; slFirst = 0; slTau = 0; slCount = 0; slSlope = 0;
         // común
         target = -1; mSmooth = 0;
         voiced = false; detectedHz = 0; correctionCents = 0; inputMidi = 0; outputMidi = 0;
@@ -429,6 +431,7 @@ public:
         for (int c = 0; c < nch; ++c) inCh[c][w] = x[c];
         if (detector.push (mid)) updatePitch();
         placeMarks();   // os dous xeitos seguen os ciclos da voz
+        if (quality != Studio) slideUpdate();
         if (quality == Studio) studioSample (y); else directSample (y);
         ++n;
     }
@@ -658,6 +661,126 @@ private:
         return acc;
     }
 
+    // ============================================================ ton deslizante
+    // Para Directo e Preciso: cada poucas mostras mide o período nunha xanela de período e
+    // medio que acaba na última mostra (correlación normalizada arredor do período anterior,
+    // con parábola). As medidas solápanse, así non teñen o tremor dun ciclo solto, e o seu
+    // centro queda moi preto de onde se le: o ton no punto de lectura interpólase entre
+    // medidas (ou extrapólase un anaco coa pendente do último período). En voz real erra
+    // a metade cás marcas de ciclo extrapoladas.
+    struct SlEntry { double c, m; };
+    static constexpr int slMax = 256;
+    SlEntry slH[slMax] {};
+    int slFirst = 0, slN = 0, slCount = 0;
+    double slTau = 0, slSlope = 0;
+
+    const SlEntry& slAt (int k) const { return slH[(slFirst + k) % slMax]; }
+
+    // 1 − correlación normalizada entre a xanela [end−W+1, end] e a mesma t mostras antes
+    // (aa: enerxía da xanela, común a todos os atrasos)
+    double slDiff (int64_t end, int W, int t, double aa) const
+    {
+        const int64_t a0 = end - W + 1, b0 = a0 - t;
+        const size_t mask = (size_t) (ringSize - 1);
+        const size_t ia = (size_t) a0 & mask, ib = (size_t) b0 & mask;
+        double ab0 = 0, ab1 = 0, bb0 = 1e-20, bb1 = 0;
+        if (ia + (size_t) W <= (size_t) ringSize && ib + (size_t) W <= (size_t) ringSize)
+        {
+            const float* A = in.data() + ia; const float* B = in.data() + ib;   // tramo seguido: o bucle rápido
+            int k = 0;
+            for (; k + 1 < W; k += 2)
+            {
+                ab0 += (double) A[k] * B[k];         bb0 += (double) B[k] * B[k];
+                ab1 += (double) A[k + 1] * B[k + 1]; bb1 += (double) B[k + 1] * B[k + 1];
+            }
+            for (; k < W; ++k) { ab0 += (double) A[k] * B[k]; bb0 += (double) B[k] * B[k]; }
+        }
+        else
+            for (int k = 0; k < W; ++k)
+            {
+                const double a = in[(ia + (size_t) k) & mask], b = in[(ib + (size_t) k) & mask];
+                ab0 += a * b; bb0 += b * b;
+            }
+        return 1.0 - (ab0 + ab1) / std::sqrt (aa * (bb0 + bb1));
+    }
+
+    void slideUpdate()
+    {
+        if (! voiced) { slN = 0; slTau = 0; return; }
+        const double Pd = curP;
+        if (slTau > 0.0 && std::abs (slTau / Pd - 1.0) > 0.2) { slN = 0; slTau = 0; }   // o detector di outra cousa: volve empezar
+        const double Pref = slTau > 0.0 ? slTau : Pd;
+        const int hop = (int) clampd (Pref / 16.0, 8.0, 48.0);
+        if (++slCount < hop) return;   // tamén ao buscar de novo: así non custa máis
+        slCount = 0;
+        const int W = (int) std::lround (1.5 * Pref);
+        if (n < W + 2 * pMaxAlloc) return;
+        const int64_t end = n;
+        double aa = 1e-20;
+        {
+            const size_t mask = (size_t) (ringSize - 1);
+            for (int k = 0; k < W; ++k) { const double a = in[(size_t) (end - W + 1 + k) & mask]; aa += a * a; }
+        }
+        double d[64];
+        int lo, hi;
+        // de medida en medida o período case non cambia: abonda con mirar ±1 (e seguir se fai falta)
+        if (slTau > 0.0) { const int t0 = (int) std::lround (slTau); lo = t0 - 1; hi = t0 + 1; }
+        else { lo = (int) std::floor (Pd * 0.85); hi = (int) std::ceil (Pd * 1.15); }
+        lo = std::max (2, lo); hi = std::min (hi, pMaxAlloc);
+        // busca: se o mínimo cae no bordo, segue costa abaixo (ata 8 pasos máis)
+        int best = -1; double bv = 1e9;
+        auto eval = [&] (int t) { return slDiff (end, W, t, aa); };
+        if (hi - lo + 1 <= 64)
+        {
+            for (int t = lo; t <= hi; ++t) { d[t - lo] = eval (t); if (d[t - lo] < bv) { bv = d[t - lo]; best = t; } }
+        }
+        else
+        {
+            for (int t = lo; t <= hi; ++t) { const double v = eval (t); if (v < bv) { bv = v; best = t; } }
+        }
+        auto at = [&] (int t) { return (t >= lo && t <= hi && hi - lo + 1 <= 64) ? d[t - lo] : eval (t); };
+        int steps = 0;
+        while (steps < 8 && best > 2 && best < pMaxAlloc)
+        {
+            const double l = at (best - 1), r = at (best + 1);
+            if (l < bv) { bv = l; --best; } else if (r < bv) { bv = r; ++best; } else break;
+            ++steps;
+        }
+        if (bv > 0.4 || best <= 2 || best >= pMaxAlloc) { slN = 0; slTau = 0; return; }   // pouco periódico
+        const double y0 = at (best - 1), y1 = bv, y2 = at (best + 1), den = y0 - 2.0 * y1 + y2;
+        const double tau = best + (den > 0.0 ? clampd (0.5 * (y0 - y2) / den, -0.5, 0.5) : 0.0);
+        slTau = tau;
+        const SlEntry e { (double) end - 0.5 * (W - 1) - 0.5 * tau, 69.0 + 12.0 * std::log2 (sr / tau / refA) };
+        if (slN > 0 && e.c <= slAt (slN - 1).c) return;
+        slH[(slFirst + slN) % slMax] = e;
+        if (slN < slMax) ++slN; else slFirst = (slFirst + 1) % slMax;
+        // pendente: recta polas medidas do último período
+        double tm = 0, mm = 0; int cnt = 0;
+        for (int k = slN - 1; k >= 0 && slAt (k).c > e.c - tau; --k) { tm += slAt (k).c; mm += slAt (k).m; ++cnt; }
+        slSlope = 0;
+        if (cnt >= 3)
+        {
+            tm /= cnt; mm /= cnt;
+            double num = 0, dd = 0;
+            for (int k = slN - 1; k >= slN - cnt; --k) { const double dt = slAt (k).c - tm; num += dt * (slAt (k).m - mm); dd += dt * dt; }
+            if (dd > 0) slSlope = clampd (num / dd, -25.0 / sr, 25.0 / sr);
+        }
+    }
+
+    bool pitchAtSliding (double p, double& m) const
+    {
+        if (slN == 0) return false;
+        const SlEntry& last = slAt (slN - 1);
+        if (p >= last.c) { m = last.m + slSlope * std::min (p - last.c, 4.0 * slTau); return true; }
+        const SlEntry& first = slAt (0);
+        if (p < first.c) { if (p < first.c - 2.0 * slTau) return false; m = first.m; return true; }
+        int lo = 0, hi = slN - 1;   // slAt(lo).c <= p < slAt(hi).c
+        while (hi - lo > 1) { const int mid = (lo + hi) / 2; if (slAt (mid).c <= p) lo = mid; else hi = mid; }
+        const SlEntry& a = slAt (lo); const SlEntry& b = slAt (hi);
+        m = a.m + (b.m - a.m) * (p - a.c) / std::max (1e-9, b.c - a.c);
+        return true;
+    }
+
     // ============================================================ directo
     // Mellor salto (arredor de nominal, en ±range) para que o tramo que empeza en p+sign·j
     // se pareza ao que empeza en p: correlación normalizada sobre o fundido + parábola.
@@ -697,7 +820,10 @@ private:
         if (voiced)
         {
             double mi = 0;
-            if (pitchAtFromMarks (rp, mi)) mNow = mi;                 // xa medido: o ton dos ciclos onde se le
+            // o suavizado da corrección (1,5 ms) atrasaría a corrección: o ton mírase ese
+            // anaco por diante do punto de lectura, así a corrección chega a tempo
+            if (pitchAtSliding (rp + rho * lookAhead, mi)) mNow = mi;   // o ton medido á par da lectura
+            else if (pitchAtFromMarks (rp, mi)) mNow = mi;            // xa medido: o ton dos ciclos onde se le
             else if (cycleOk)
                 mNow = cycleM + cycleSlope * clampd (rp - cycleT, 0.0, 4.0 * curP);   // aínda non: extrapólase
         }
@@ -1031,7 +1157,7 @@ private:
     bool synVoiced = false;
 
     // directo
-    double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01;
+    double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, lookAhead = 0;
     double cycleM = 0, cycleT = 0, cycleSlope = 0, ffixAlpha = 0.001;
     FormantFix ffix;
     bool cycleOk = false;

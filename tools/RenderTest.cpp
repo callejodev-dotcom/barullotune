@@ -719,6 +719,49 @@ int main (int argc, char** argv)
         check ("directo +5: sen voz de esquío", dd < 0.65 * dc && dd < ds + 1.0);
     }
 
+    // consoantes xordas ao transpor ±7: a «s» sae co seu nivel e sen estalos (antes, en
+    // Directo baixando, ata 11 dB máis forte e cun estalo de 10 ms na fronteira coa vogal)
+    {
+        std::vector<float> fx;
+        std::mt19937 rr (21); std::normal_distribution<double> gn (0, 1);
+        double ph = 0, hp = 0, pv = 0, z1 = 0, z2 = 0;
+        auto vowel = [&] (double dur)
+        {
+            for (int i = 0; i < (int) (dur * SR); ++i)
+            {
+                const double f0 = 220.0; ph += f0 / SR; double sm = 0;
+                for (int h = 1; h <= 40; ++h) sm += envAt (VA, h * f0) / h * std::sin (2 * juce::MathConstants<double>::pi * h * ph);
+                fx.push_back ((float) (0.1 * sm * std::min (1.0, i / 480.0)));
+            }
+        };
+        vowel (0.4);
+        const size_t fa = fx.size();
+        for (int i = 0; i < (int) (0.18 * SR); ++i)
+        {
+            const double w = gn (rr); hp = 0.85 * (hp + w - pv); pv = w;
+            const double yv = hp - 1.2 * z1 - 0.5 * z2; z2 = z1; z1 = yv;
+            fx.push_back ((float) (0.03 * yv * std::sin (juce::MathConstants<double>::pi * i / (0.18 * SR))));
+        }
+        const size_t fb = fx.size();
+        vowel (0.4);
+        auto level = [] (const float* x, size_t a, size_t b) { double e = 0; for (size_t i = a; i < b; ++i) e += (double) x[i] * x[i]; return 10.0 * std::log10 (e / (double) (b - a) + 1e-20); };
+        const double li = level (fx.data(), fa + 1000, fb - 1000);
+        double worst = 0, worstBurst = -99;
+        for (int q = 0; q < 3; ++q)
+            for (int semis : { 7, -7 })
+            {
+                int l = 0;
+                auto y = run (fx, 512, 1, [&] (TuneProcessor& p) { setP (p, "calidade", (float) q); setP (p, "escala", 0); setP (p, "transpor", (float) semis); }, l);
+                const double lo = level (y.getReadPointer (0), fa + 1000 + (size_t) l, fb - 1000 + (size_t) l);
+                worst = std::max (worst, std::abs (lo - li));
+                for (size_t w = fa + 960; w + 240 + 960 < fb; w += 240)   // (nos bordos a entrada está case en silencio)
+                    worstBurst = std::max (worstBurst, level (y.getReadPointer (0), w + (size_t) l, w + 240 + (size_t) l) - level (fx.data(), w, w + 240));
+            }
+        std::printf ("«s» ao transpor ±7: nivel como moito %.1f dB distinto, pico de 5 ms como moito %+.1f dB\n", worst, worstBurst);
+        metric ("sibilante.nivel.db", worst); metric ("sibilante.pico.db", std::max (0.0, worstBurst));
+        check ("transpor: a «s» co seu nivel e sen estalos", worst < 4.0 && worstBurst < 9.0);
+    }
+
     // rango: menos latencia en estudio con voz aguda
     {
         int lg = 0, la = 0;

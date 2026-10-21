@@ -25,6 +25,8 @@ public:
         dMin = (int) std::ceil (1.1 * xfade) + 4 + Sinc::half;   // o interpolador mira 8 mostras adiante
         ffix.prepare (sr);
         ffixAlpha = 1.0 - std::exp (-1.0 / (0.02 * sr));
+        ffixAlphaFast = 1.0 - std::exp (-1.0 / (0.005 * sr));
+        envAlpha = 1.0 - std::exp (-1.0 / (0.003 * sr));
         dirAlpha = 1.0 - std::exp (-1.0 / (0.0015 * sr));
         lookAhead = 0.0015 * sr;   // o atraso dese suavizado
     }
@@ -36,6 +38,7 @@ public:
     void reset()
     {
         ffix.reset();
+        envIn[0] = envIn[1] = envOut[0] = envOut[1] = 0;
         decider.reset(); decCount = 0;
         rp = -(double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; state = {};
     }
@@ -45,8 +48,10 @@ public:
         const int nch = an.nch;
         const bool voiced = an.voiced;
         const double transpose = set.transpose;
-        // corrección mostra a mostra (co ton detectado agora mesmo)
-        double raw = transpose;
+        // corrección mostra a mostra (co ton detectado agora mesmo). Sen ton (consoantes
+        // xordas, respiracións) lese a velocidade 1: unha «s» non ten nota que transpor, e
+        // transposta e despois corrixida polos formantes saía ata 5 dB máis forte
+        double raw = voiced ? transpose : 0.0;
         double mNow = an.inputMidi;
         if (voiced)
         {
@@ -90,31 +95,35 @@ public:
         }
         rp += rho;
 
-        // formantes: ao transpor (ou co mando de formantes) devolve o timbre da voz orixinal
+        // formantes: ao transpor (ou co mando de formantes) devolve o timbre da voz orixinal.
+        // Sen ton (consoantes, respiracións) lese a velocidade 1 e non hai nada que corrixir:
+        // apágase en 5 ms (na fronteira entre unha vogal e unha «s», as dúas envolventes son
+        // de sons distintos e unha resonancia aguda disparábase uns 10 ms)
         const double formant = set.formant;
-        const bool want = std::abs (transpose) >= 0.99 || std::abs (formant) >= 0.05;
-        ffix.amount += ((want ? 1.0 : 0.0) - ffix.amount) * ffixAlpha;
+        const bool want = voiced && (std::abs (transpose) >= 0.99 || std::abs (formant) >= 0.05);
+        ffix.amount += ((want ? 1.0 : 0.0) - ffix.amount) * (want ? ffixAlpha : ffixAlphaFast);
         if (ffix.amount < 1e-4 && ! want) { if (ffix.ready) ffix.reset(); }
         else
         {
             const float mid = nch == 1 ? y[0] : 0.5f * (y[0] + y[1]);
             if (ffix.pushY (mid))
             {
-                // marco da orixinal, lido á velocidade dos formantes (máis rápido = formantes máis altos)
+                // marco da orixinal, lido á velocidade dos formantes (máis rápido = formantes
+                // máis altos) e aliñado co que se está lendo: remata no punto de lectura, non
+                // na última mostra que entrou (a lectura vai ata 15 ms detrás e, entre unha
+                // vogal e unha «s», as dúas envolventes eran de sons distintos)
                 const double phi = std::pow (2.0, clampd (formant, -7.0, 7.0) / 12.0);
-                const int64_t n = an.n;
-                if (std::abs (formant) < 0.05)
-                    for (int i = 0; i < ffix.frame; ++i) ffix.xf[(size_t) i] = an.in[(size_t) ((n - ffix.frame + 1 + i) & (an.ringSize - 1))];
-                else
-                {
-                    const double start = (double) n - (double) ffix.frame * phi;
-                    for (int i = 0; i < ffix.frame; ++i) ffix.xf[(size_t) i] = an.read (an.in, start + i * phi);
-                }
+                const double start = std::min (rp, (double) an.n - Sinc::half) - (double) ffix.frame * phi;
+                for (int i = 0; i < ffix.frame; ++i) ffix.xf[(size_t) i] = an.read (an.in, start + i * phi);
                 ffix.analyse (ffix.xf.data());   // (analiza a orixinal antes de reutilizar o marco)
             }
             for (int c = 0; c < nch; ++c)
             {
-                const float fixed = ffix.process (c, y[c]);
+                double fixed = ffix.process (c, y[c]);
+                // seguridade: a corrección non pode deixar a voz máis do dobre de forte (3 ms)
+                envIn[c] += ((double) y[c] * y[c] - envIn[c]) * envAlpha;
+                envOut[c] += (fixed * fixed - envOut[c]) * envAlpha;
+                if (envOut[c] > 4.0 * envIn[c] + 1e-12) fixed *= std::sqrt ((4.0 * envIn[c] + 1e-12) / envOut[c]);
                 y[c] = (float) (y[c] + (fixed - y[c]) * ffix.amount);
             }
         }
@@ -184,7 +193,8 @@ private:
     bool precise = false;
     FormantFix ffix;
     double sr = 48000;
-    double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, lookAhead = 0, ffixAlpha = 0.001;
+    double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, lookAhead = 0, ffixAlpha = 0.001, ffixAlphaFast = 0.004, envAlpha = 0.007;
+    double envIn[2] {}, envOut[2] {};
     int xfade = 36, dMin = 44, dLead = 44;
     int xfPos = -1, xfLen = 36;
     double score[maxSearch] {};

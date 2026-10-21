@@ -11,6 +11,7 @@ D="$WORK/BarulloTune-$VER-linux-x86_64"
 mkdir -p "$D"
 cp -R "$ART/VST3/$NAME.vst3" "$D/"
 cp -R "$ART/LV2/$NAME.lv2" "$D/"
+[ -e "$ART/CLAP/$NAME.clap" ] && cp -R "$ART/CLAP/$NAME.clap" "$D/"
 cp "$ART/Standalone/$NAME" "$D/barullo-tune"
 strip "$D/barullo-tune" "$D/$NAME.vst3/Contents/x86_64-linux/$NAME.so" "$D/$NAME.lv2/lib$NAME.so" || true
 
@@ -19,8 +20,9 @@ cat > "$D/instalar.sh" <<'EOS'
 # Instala Barullo Tune para o teu usuario (sen sudo): VST3 en ~/.vst3, LV2 en ~/.lv2, a app en ~/.local/bin
 set -e
 cd "$(dirname "$0")"
-mkdir -p "$HOME/.vst3" "$HOME/.lv2" "$HOME/.local/bin" "$HOME/.local/share/applications"
-rm -rf "$HOME/.vst3/Barullo Tune.vst3" "$HOME/.lv2/Barullo Tune.lv2"
+mkdir -p "$HOME/.vst3" "$HOME/.lv2" "$HOME/.clap" "$HOME/.local/bin" "$HOME/.local/share/applications"
+rm -rf "$HOME/.vst3/Barullo Tune.vst3" "$HOME/.lv2/Barullo Tune.lv2" "$HOME/.clap/Barullo Tune.clap"
+[ -e "Barullo Tune.clap" ] && cp -R "Barullo Tune.clap" "$HOME/.clap/"
 cp -R "Barullo Tune.vst3" "$HOME/.vst3/"
 cp -R "Barullo Tune.lv2" "$HOME/.lv2/"
 cp barullo-tune "$HOME/.local/bin/"
@@ -36,7 +38,7 @@ echo "Instalado. Volve abrir o teu DAW e busca «Barullo Tune»; a app está no 
 EOS
 cat > "$D/desinstalar.sh" <<'EOS'
 #!/bin/sh
-rm -rf "$HOME/.vst3/Barullo Tune.vst3" "$HOME/.lv2/Barullo Tune.lv2" "$HOME/.local/bin/barullo-tune" "$HOME/.local/share/applications/barullo-tune.desktop"
+rm -rf "$HOME/.vst3/Barullo Tune.vst3" "$HOME/.lv2/Barullo Tune.lv2" "$HOME/.clap/Barullo Tune.clap" "$HOME/.local/bin/barullo-tune" "$HOME/.local/share/applications/barullo-tune.desktop"
 echo "Barullo Tune desinstalado."
 EOS
 chmod +x "$D/instalar.sh" "$D/desinstalar.sh" "$D/barullo-tune"
@@ -47,7 +49,7 @@ Unha ferramenta de Escoita · https://www.escoita.link
 Instalar:    ./instalar.sh      (para o teu usuario, sen sudo)
 Desinstalar: ./desinstalar.sh
 
-Formatos: VST3 (~/.vst3), LV2 (~/.lv2) e aplicación independente (barullo-tune).
+Formatos: VST3 (~/.vst3), LV2 (~/.lv2), CLAP (~/.clap) e aplicación independente (barullo-tune).
 A aplicación precisa ALSA ou JACK; o plugin funciona en calquera DAW con VST3 ou LV2
 (Bitwig, Reaper, Ardour, Carla…).
 EOS

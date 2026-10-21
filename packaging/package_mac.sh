@@ -14,8 +14,9 @@ NAME="Barullo Tune"
 mkdir -p "$OUT"
 WORK="$(mktemp -d)"
 ROOT="$WORK/root"
-mkdir -p "$ROOT/Library/Audio/Plug-Ins/VST3" "$ROOT/Library/Audio/Plug-Ins/Components" "$ROOT/Applications"
+mkdir -p "$ROOT/Library/Audio/Plug-Ins/VST3" "$ROOT/Library/Audio/Plug-Ins/Components" "$ROOT/Library/Audio/Plug-Ins/CLAP" "$ROOT/Applications"
 cp -R "$ART/VST3/$NAME.vst3"       "$ROOT/Library/Audio/Plug-Ins/VST3/"
+[ -d "$ART/CLAP/$NAME.clap" ] && cp -R "$ART/CLAP/$NAME.clap" "$ROOT/Library/Audio/Plug-Ins/CLAP/"
 cp -R "$ART/AU/$NAME.component"    "$ROOT/Library/Audio/Plug-Ins/Components/"
 cp -R "$ART/Standalone/$NAME.app"  "$ROOT/Applications/"
 
@@ -23,7 +24,8 @@ cp -R "$ART/Standalone/$NAME.app"  "$ROOT/Applications/"
 lipo -info "$ROOT/Applications/$NAME.app/Contents/MacOS/$NAME"
 
 SIGN_ID="${MACOS_DEV_ID:--}"
-for b in "$ROOT/Library/Audio/Plug-Ins/VST3/$NAME.vst3" "$ROOT/Library/Audio/Plug-Ins/Components/$NAME.component" "$ROOT/Applications/$NAME.app"; do
+for b in "$ROOT/Library/Audio/Plug-Ins/VST3/$NAME.vst3" "$ROOT/Library/Audio/Plug-Ins/Components/$NAME.component" "$ROOT/Library/Audio/Plug-Ins/CLAP/$NAME.clap" "$ROOT/Applications/$NAME.app"; do
+  [ -e "$b" ] || continue
   if [ "$SIGN_ID" = "-" ]; then
     codesign --force --deep --sign - "$b"
   else
@@ -59,6 +61,7 @@ fi
 ZIPDIR="$WORK/BarulloTune-$VER-mac"
 mkdir -p "$ZIPDIR"
 cp -R "$ROOT/Library/Audio/Plug-Ins/VST3/$NAME.vst3" "$ROOT/Library/Audio/Plug-Ins/Components/$NAME.component" "$ROOT/Applications/$NAME.app" "$ZIPDIR/"
+[ -d "$ROOT/Library/Audio/Plug-Ins/CLAP/$NAME.clap" ] && cp -R "$ROOT/Library/Audio/Plug-Ins/CLAP/$NAME.clap" "$ZIPDIR/"
 cp "$(dirname "$0")/LEEME-mac.txt" "$ZIPDIR/LEEME.txt"
 (cd "$WORK" && ditto -c -k --sequesterRsrc --keepParent "BarulloTune-$VER-mac" "$OUT/BarulloTune-$VER-mac.zip")
 echo "Hecho: $PKG y $OUT/BarulloTune-$VER-mac.zip"

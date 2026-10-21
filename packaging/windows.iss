@@ -35,16 +35,18 @@ Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Types]
-Name: "full"; Description: "Todo (VST3 e aplicación)"
+Name: "full"; Description: "Todo (VST3, CLAP e aplicación)"
 Name: "custom"; Description: "Escoller"; Flags: iscustom
 
 [Components]
 Name: "vst3"; Description: "Plugin VST3 (para el DAW)"; Types: full custom
+Name: "clap"; Description: "Plugin CLAP (para el DAW)"; Types: full custom
 Name: "app";  Description: "Aplicación independente"; Types: full custom
 
 [Files]
 ; VST3: va a la carpeta estándar C:\Program Files\Common Files\VST3
 Source: "{#ArtDir}\VST3\Barullo Tune.vst3\*"; DestDir: "{commoncf64}\VST3\Barullo Tune.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ArtDir}\CLAP\Barullo Tune.clap"; DestDir: "{commoncf64}\CLAP"; Components: clap; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#ArtDir}\Standalone\Barullo Tune.exe"; DestDir: "{app}"; Components: app; Flags: ignoreversion
 
 [Icons]

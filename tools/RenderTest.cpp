@@ -1125,6 +1125,62 @@ int main (int argc, char** argv)
         check ("desfacer e refacer", std::abs (afterUndo - 20) < 0.01f && std::abs (afterRedo - 123) < 0.01f);
     }
 
+    // estado con todos os parámetros ao chou, cambiados coma no envoltorio CLAP (setValue e
+    // avisar aos oíntes): ao gardar e cargar noutra instancia teñen que chegar todos
+    {
+        std::mt19937 rr (77);
+        std::uniform_real_distribution<float> u01 (0.0f, 1.0f);
+        TuneProcessor a;
+        for (auto* prm : a.getParameters())
+        {
+            float v = u01 (rr);
+            if (prm->isDiscrete() || prm->isBoolean()) { const int st = juce::jmax (2, prm->getNumSteps()); v = std::round (v * (float) (st - 1)) / (float) (st - 1); }   // coma un DAW: nos pasos
+            prm->setValue (v);
+            prm->sendValueChangedMessageToListeners (v);
+        }
+        juce::MemoryBlock mb; a.getStateInformation (mb);
+        TuneProcessor b; b.setStateInformation (mb.getData(), (int) mb.getSize());
+        int diff = 0; juce::String first;
+        for (int i = 0; i < a.getParameters().size(); ++i)
+        {
+            auto* pa = a.getParameters()[i]; auto* pb = b.getParameters()[i];
+            if (std::abs (pa->getValue() - pb->getValue()) > 1.0e-4f)
+            {
+                if (diff++ == 0) first = pa->getName (64) + ": " + pa->getText (pa->getValue(), 64) + " -> " + pb->getText (pb->getValue(), 64);
+                if (std::getenv ("BT_DEBUG")) std::printf ("   %s: %.4f -> %.4f\n", pa->getName (64).toRawUTF8(), pa->getValue(), pb->getValue());
+            }
+        }
+        std::printf ("estado ao chou: %d parámetros distintos despois de cargar%s%s\n", diff, diff ? " (" : "", diff ? (first + ")").toRawUTF8() : "");
+        check ("estado ao chou: chegan todos os parámetros", diff == 0);
+    }
+
+    // texto <-> valor de todos os parámetros (coma o comproba clap-validator): o texto dun
+    // valor, lido de volta, dá o mesmo texto; tamén se o texto chega en UTF-8 lido coma
+    // ASCII (cada byte un carácter), que é como o pasa o envoltorio CLAP
+    {
+        TuneProcessor a;
+        int bad = 0; juce::String first;
+        for (auto* prm : a.getParameters())
+            for (int k = 0; k <= 20; ++k)
+            {
+                const float v = (float) k / 20.0f;
+                const auto t1 = prm->getText (v, 64);
+                const auto raw = t1.toStdString();   // bytes UTF-8
+                juce::String mangled; for (char ch : raw) mangled += (juce::juce_wchar) (unsigned char) ch;
+                for (const auto& in : { t1, mangled })
+                {
+                    const auto t2 = prm->getText (prm->getValueForText (in), 64);
+                    if (t2 != t1)
+                    {
+                        if (bad++ == 0) first = prm->getName (64) + ": " + t1 + " -> " + t2;
+                        if (std::getenv ("BT_DEBUG")) std::printf ("   %s: [%s] (%s) -> %.4f -> [%s]\n", prm->getName (64).toRawUTF8(), t1.toRawUTF8(), in == t1 ? "ben" : "estragado", prm->getValueForText (in), t2.toRawUTF8());
+                    }
+                }
+            }
+        std::printf ("texto <-> valor: %d sen ida e volta%s%s\n", bad, bad ? " (" : "", bad ? (first + ")").toRawUTF8() : "");
+        check ("texto <-> valor de todos os parámetros", bad == 0);
+    }
+
     // estado
     {
         TuneProcessor a;

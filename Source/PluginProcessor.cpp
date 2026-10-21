@@ -5,6 +5,38 @@
 namespace
 {
     juce::String U (const char* s) { return juce::String::fromUTF8 (s); }
+
+    // Algúns envoltorios (CLAP) pasan o texto en UTF-8 coma se fose ASCII: cada byte un
+    // carácter («8ª» chega como «8Âª»). Se é así, recomponse.
+    juce::String repairUtf8 (const juce::String& t)
+    {
+        std::string bytes; bool high = false;
+        for (auto c : t) { if (c > 255) return t; if (c >= 128) high = true; bytes.push_back ((char) c); }
+        // ¿son UTF-8 de verdade? (cada byte de continuación, 10xxxxxx; se non, o texto xa era bo:
+        // «ó» solta é un carácter, non un byte)
+        for (size_t i = 0; i < bytes.size(); ++i)
+        {
+            const auto b = (unsigned char) bytes[i];
+            const int extra = b < 0x80 ? 0 : b >= 0xF0 ? 3 : b >= 0xE0 ? 2 : b >= 0xC2 ? 1 : -1;
+            if (extra < 0 || i + (size_t) extra >= bytes.size() + (extra == 0 ? 1 : 0)) return t;
+            for (int k = 1; k <= extra; ++k) if (((unsigned char) bytes[i + (size_t) k] & 0xC0) != 0x80) return t;
+            i += (size_t) extra;
+        }
+        if (! high) return t;
+        const auto u = juce::String::fromUTF8 (bytes.data(), (int) bytes.size());
+        return u.isEmpty() ? t : u;
+    }
+
+    // opcións: o texto (recomposto) ou, se non, o número de opción
+    juce::AudioParameterChoiceAttributes choiceAttrs (const juce::StringArray& choices)
+    {
+        return juce::AudioParameterChoiceAttributes().withValueFromStringFunction ([choices] (const juce::String& t)
+        {
+            const auto r = repairUtf8 (t).trim();
+            const int i = choices.indexOf (r, true);
+            return i >= 0 ? i : juce::jlimit (0, choices.size() - 1, r.getIntValue());
+        });
+    }
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
@@ -16,15 +48,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     for (int i = 0; i < 12; ++i) keys.add (scales::noteName (i));
     for (auto& s : scales::all()) sc.add (U (s.name));
 
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "modo", 1 }, U ("Modo"), modes, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "tonica", 1 }, U ("Tónica"), keys, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "escala", 1 }, U ("Escala"), sc, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "modo", 1 }, U ("Modo"), modes, 0, choiceAttrs (modes)));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "tonica", 1 }, U ("Tónica"), keys, 0, choiceAttrs (keys)));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "escala", 1 }, U ("Escala"), sc, 1, choiceAttrs (sc)));
     for (int i = 0; i < 12; ++i)
         l.add (std::make_unique<AudioParameterBool> (ParameterID { "nota" + String (i), 1 }, U ("Nota ") + scales::noteName (i), true));
     for (int i = 0; i < 12; ++i)
         l.add (std::make_unique<AudioParameterBool> (ParameterID { "libre" + String (i), 1 }, U ("Libre ") + scales::noteName (i), false));
     // afinación: igual (12 semitonos iguais), xusta (respecto da tónica) ou personalizada (cents por nota)
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "afinacion", 1 }, U ("Afinación"), StringArray { U ("Igual"), U ("Xusta"), U ("Personalizada"), U ("MTS-ESP") }, 0));
+    const StringArray afins { U ("Igual"), U ("Xusta"), U ("Personalizada"), U ("MTS-ESP") };
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "afinacion", 1 }, U ("Afinación"), afins, 0, choiceAttrs (afins)));
     for (int i = 0; i < 12; ++i)
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { "cents" + String (i), 1 }, U ("Cents ") + scales::noteName (i), NormalisableRange<float> (-50.0f, 50.0f, 0.01f), 0.0f,
             AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " c"; })));
@@ -56,11 +89,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, U ("Volume"), NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; })));
     // cambian a latencia: non se automatizan
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "calidade", 1 }, U ("Xeito"), StringArray { U ("Directo"), U ("Preciso"), U ("Estudio") }, 0,
-        AudioParameterChoiceAttributes().withAutomatable (false)));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "rango", 1 }, U ("Voz"),
-        StringArray { U ("Baixo"), U ("Barítono"), U ("Tenor"), U ("Alto"), U ("Mezzo"), U ("Soprano"), U ("Calquera") }, 6,
-        AudioParameterChoiceAttributes().withAutomatable (false)));
+    const StringArray cals { U ("Directo"), U ("Preciso"), U ("Estudio") };
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "calidade", 1 }, U ("Xeito"), cals, 0, choiceAttrs (cals).withAutomatable (false)));
+    const StringArray voices { U ("Baixo"), U ("Barítono"), U ("Tenor"), U ("Alto"), U ("Mezzo"), U ("Soprano"), U ("Calquera") };
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "rango", 1 }, U ("Voz"), voices, 6, choiceAttrs (voices).withAutomatable (false)));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "comparar", 1 }, U ("Comparar (voz orixinal)"), false));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, U ("Bypass"), false));
 
@@ -86,19 +118,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("non") : String (roundToInt (v)) + " %"; })));
 
     // armonías
-    auto dbFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v <= -47.9f ? String ("non") : String (v, 1) + " dB"; });
+    auto dbFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v <= -47.9f ? String ("non") : String (v, 1) + " dB"; })
+                                                 .withValueFromStringFunction ([] (const String& t) { return t.trim().startsWithIgnoreCase ("non") ? -48.0f : t.getFloatValue(); });
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "principal", 1 }, U ("Voz principal"), NormalisableRange<float> (-48.0f, 6.0f, 0.1f), 0.0f, dbFmt));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "armonia_modo", 1 }, U ("Armonías"), StringArray { U ("Escala"), U ("Acorde MIDI") }, 0));
+    const StringArray hmodes { U ("Escala"), U ("Acorde MIDI") };
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "armonia_modo", 1 }, U ("Armonías"), hmodes, 0, choiceAttrs (hmodes)));
     for (int h = 0; h < TuneProcessor::numHarmonies; ++h)
     {
         const String id ("harm" + String (h + 1)), nm (U ("Armonía ") + String (h + 1));
         static const int defInt[4] = { 9, 11, 5, 0 };
         static const float defPan[4] = { -35, 35, -65, 65 }, defDet[4] = { 5, -6, 8, -4 }, defDel[4] = { 10, 18, 25, 32 };
         l.add (std::make_unique<AudioParameterBool> (ParameterID { id, 1 }, nm, false));
-        l.add (std::make_unique<AudioParameterChoice> (ParameterID { id + "_intervalo", 1 }, nm + U (": intervalo"), TuneProcessor::intervalNames(), defInt[h]));
+        l.add (std::make_unique<AudioParameterChoice> (ParameterID { id + "_intervalo", 1 }, nm + U (": intervalo"), TuneProcessor::intervalNames(), defInt[h], choiceAttrs (TuneProcessor::intervalNames())));
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_nivel", 1 }, nm + U (": nivel"), NormalisableRange<float> (-48.0f, 6.0f, 0.1f), -4.0f, dbFmt));
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_pan", 1 }, nm + U (": panorama"), NormalisableRange<float> (-100.0f, 100.0f, 1.0f), defPan[h],
-            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { const int i = roundToInt (v); return i == 0 ? String ("C") : (i < 0 ? "I" + String (-i) : "D" + String (i)); })));
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { const int i = roundToInt (v); return i == 0 ? String ("C") : (i < 0 ? "I" + String (-i) : "D" + String (i)); })
+                                           .withValueFromStringFunction ([] (const String& t)
+                                           {
+                                               const auto s = t.trim().toUpperCase();
+                                               if (s.startsWith ("I") || s.startsWith ("L")) return -s.substring (1).getFloatValue();
+                                               if (s.startsWith ("D") || s.startsWith ("R")) return s.substring (1).getFloatValue();
+                                               return s.startsWith ("C") ? 0.0f : s.getFloatValue();
+                                           })));
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_desafinar", 1 }, nm + U (": desafinar"), NormalisableRange<float> (-25.0f, 25.0f, 0.1f), defDet[h],
             AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " c"; })));
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { id + "_atraso", 1 }, nm + U (": atraso"), NormalisableRange<float> (0.0f, 60.0f, 0.1f), defDel[h],
@@ -867,6 +908,8 @@ void TuneProcessor::setStateInformation (const void* data, int size)
     currentPreset = juce::jlimit (0, (int) presets().size() - 1, pr);
     uiScale = juce::jlimit (0.75f, 1.5f, (float) (double) st.getProperty ("ui", 1.0));
     uiTab = juce::jlimit (0, 3, (int) st.getProperty ("tab", 0));
+    // os valores cambiaron todos de golpe: que o DAW os volva ler (en CLAP, «rescan»)
+    updateHostDisplay (juce::AudioProcessor::ChangeDetails().withProgramChanged (true));
 }
 
 juce::AudioProcessorEditor* TuneProcessor::createEditor() { return new TuneEditor (*this); }

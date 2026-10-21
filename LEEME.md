@@ -6,9 +6,9 @@ Unha ferramenta de [Escoita](https://www.escoita.link).
 
 | Sistema | Instalador | Á man |
 |---|---|---|
-| **Mac** (Apple Silicon e Intel, macOS 11+): AU, VST3 e app | `BarulloTune-…-mac.pkg` | `BarulloTune-…-mac.zip` |
-| **Windows** (64 bits): VST3 e app | `BarulloTune-…-windows-setup.exe` | `BarulloTune-…-windows-x64.zip` |
-| **Linux** (x86_64): VST3, LV2 e app | — | `BarulloTune-…-linux-x86_64.tar.gz` → `./instalar.sh` |
+| **Mac** (Apple Silicon e Intel, macOS 11+): AU, VST3, CLAP e app | `BarulloTune-…-mac.pkg` | `BarulloTune-…-mac.zip` |
+| **Windows** (64 bits): VST3, CLAP e app | `BarulloTune-…-windows-setup.exe` | `BarulloTune-…-windows-x64.zip` |
+| **Linux** (x86_64): VST3, LV2, CLAP e app | — | `BarulloTune-…-linux-x86_64.tar.gz` → `./instalar.sh` |
 
 Se o sistema avisa ao abrilo:
 - **Mac:** clic dereito sobre o instalador → *Abrir* → *Abrir*.
@@ -108,7 +108,8 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Automatización ao chou**: 60 s con todos os parámetros movéndose, bloques de 1 a 1024 mostras, MIDI, cambios de xeito e de frecuencia de mostraxe (22–192 kHz), con voz, ruído, silencio, continua, cadrada a 0 dBFS, impulsos e voz saturada: sempre finito e sen disparar.
 - **Sanitizadores** (AddressSanitizer e UBSan) sobre toda a proba no CI; avisos como erros no código propio no Mac.
 - **Sen retrocesos**: o CI compara as métricas (sintéticas nos tres sistemas e voces reais en Linux) coa base e falla se algo empeora.
-- **pluginval** ao nivel máximo (10), con probas de interface; auval no Mac.
+- **Texto ↔ valor** de todos os parámetros con ida e volta, tamén se o texto chega en UTF-8 lido coma ASCII (como o pasa o envoltorio CLAP). **Estado ao chou** (todos os parámetros, cambiados coma no envoltorio CLAP): chegan todos ao cargar noutra instancia.
+- **pluginval** ao nivel máximo (10), con probas de interface; auval no Mac; **clap-validator** (CLAP): 34 probas ben, ningunha mal.
 
 ## Publicar unha versión
 
@@ -127,4 +128,4 @@ A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 
 Barullo Tune es software libre: se publica bajo la licencia **GNU Affero General Public License v3.0** (archivo `LICENSE`). Puedes usarlo, estudiarlo, modificarlo y compartirlo; si distribuyes una versión modificada, tiene que ir con su código y bajo la misma licencia.
 
-Usa JUCE 8 bajo su licencia AGPLv3. La tipografía Barlow va con su licencia OFL (`Resources/Barlow-OFL.txt`).
+Usa JUCE 8 bajo su licencia AGPLv3 y, para el formato CLAP, clap-juce-extensions (licencia MIT). La tipografía Barlow va con su licencia OFL (`Resources/Barlow-OFL.txt`).

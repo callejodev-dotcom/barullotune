@@ -54,6 +54,26 @@ juce_add_plugin(BarulloTune
   LV2_SHARED_LIBRARY_NAME "BarulloTune"
   COPY_PLUGIN_AFTER_BUILD FALSE)
 
+# CLAP (clap-juce-extensions, licencia MIT): se descarga al configurar
+option(BARULLO_CLAP "Compilar también el formato CLAP" ON)
+if(BARULLO_CLAP)
+  include(FetchContent)
+  FetchContent_Declare(clap-juce-extensions
+    GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
+    GIT_TAG 7adee3a1bd4684d4caa5601100e364abccff4b4d   # main (2026): a 0.26.0 aínda non vai con JUCE 8
+    GIT_SUBMODULES_RECURSE TRUE)
+  FetchContent_GetProperties(clap-juce-extensions)
+  if(NOT clap-juce-extensions_POPULATED)
+    FetchContent_Populate(clap-juce-extensions)
+    add_subdirectory(${clap-juce-extensions_SOURCE_DIR} ${clap-juce-extensions_BINARY_DIR} EXCLUDE_FROM_ALL)
+  endif()
+  clap_juce_extensions_plugin(TARGET BarulloTune
+    CLAP_ID "link.escoita.barullotune"
+    CLAP_FEATURES audio-effect pitch-correction stereo mono
+    CLAP_MANUAL_URL "https://www.escoita.link"
+    CLAP_SUPPORT_URL "https://www.escoita.link")
+endif()
+
 # tipografía Barlow (licencia OFL, ver Resources/Barlow-OFL.txt)
 juce_add_binary_data(BTFonts SOURCES
   Resources/BarlowSemiCondensed-Medium.ttf

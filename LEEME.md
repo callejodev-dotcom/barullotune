@@ -42,6 +42,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 | `Source/tune/` | O motor, en pezas: `Analysis.h` (detector, marcas de ciclo, ton deslizante e decisión da nota, común a todas as voces), `DirectVoice.h` (Directo e Preciso), `StudioVoice.h` (Estudio, PSOLA), `Correction.h` (axustes e modelo de corrección), `FormantFix.h`, `PitchDetector.h`, `Dsp.h` e `Engine.h`, que as xunta. Como funciona: Detector de ton tipo YIN (sinal diezmada a ~12 kHz, cada 4 ms), con continuidade e confirmación ao comezar. Marcas de ciclo aliñadas por correlación, con precisión de fracción de mostra. Lectura entre mostras con sinc de 16 puntos (agudos planos ata 16 kHz). **Directo** e **Preciso**: a voz lese a outra velocidade e salta un ciclo enteiro cando se adianta ou se atrasa (fundido de 0,6 ms; latencia 0,9 ms); o ton mídese cada poucas mostras nunha xanela deslizante de período e medio que acaba na última mostra (correlación normalizada arredor do período anterior, con parábola): as medidas solápanse, así non teñen o tremor dun ciclo solto, e o ton no punto que se le interpólase entre elas (en Directo, extrapólase un anaco coa pendente do último período; en Preciso, a lectura vai 11,5 ms detrás e sempre cae entre medidas). O ton mírase 1,5 ms por diante do punto de lectura, o mesmo que tarda o suavizado da corrección, para que a corrección chegue a tempo. Ao transpor ou mover os formantes, unha **corrección de formantes sen latencia** mide cada 5 ms a envolvente (predición lineal de orde ~37) da voz orixinal e da lida, e coa lida fai: branquear coa súa envolvente e colorear coa orixinal (celosías con coeficientes de reflexión interpolados, sempre estables). **Estudio**: TD-PSOLA en tempo real, cada grano corrixido co seu propio período, e formantes lendo o grano a outra velocidade. Modelo de corrección común: o vibrato sepárase cun filtro de banda (3–8 Hz) e só se respecta se é regular (medios ciclos de 60–140 ms parecidos entre si e máis de 8 cents): a oscilación irregular dunha voz insegura corríxese coma calquera desafinación; o centro vai á nota con «velocidade», a nota de destino móvese con «transición» e o vibrato volve sumarse. Nos portamentos (a voz movéndose máis de 4 semitonos/s) a corrección sóltase en proporción á transición, para non arrastrar a voz cara á nota anterior; e a nota nova acéptase xa se a voz vai claramente cara a ela. |
 | `Source/Plugin*.cpp` | O plugin JUCE e a interface |
 | `tools/RenderTest.cpp` | Proba sen interface; con `--file entrada.wav saida.wav parámetro=valor…` procesa un ficheiro; con `--json metricas.json` garda as métricas; imprime a **huella da saída** (para comprobar que un cambio de organización non cambia nin un bit) |
+| `tools/DetectorTest.cpp` | O detector en condicións difíciles, con ton verdadeiro coñecido (só o motor, sen JUCE): segundo harmónico dominante, sen fundamental, voz aireada, ruído a 10 e 5 dB, reverberación, voz grave, soprano e vibrato ancho |
 | `tools/compara.py` | Compara as métricas coa base (`tools/metricas-base.json`, `tools/banco-base.json`) e falla se algo empeora; con `--gardar` actualiza a base |
 | `tools/banco.py` | Banco de voces reais: cada voz polos tres xeitos, con cents, saltos (a saída sepárase máis de 1,6 semitonos da entrada) e perdas |
 | `tools/analise.py` | Mide a afinación dunha voz antes e despois (YIN, vibrato, centro das notas, gráfico) |
@@ -60,6 +61,20 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
   | saltos (a saída a máis de 1,6 semitonos da voz) | 1,3 % (antes 6,2 %) | 1,1 % (antes 4,3 %) | 1,9 % (antes 7,8 %) |
 
   Os saltos eran a nota de destino quedando atrás nos glisandos rápidos. Agora cada voz de saída decide a súa nota co ton do punto que está lendo (Estudio, coa media dos ciclos a ±10 ms do grano, que xa ten medidos) e, nun glisando de máis dun semitono que non sexa vibrato, o suavizado da decisión volve empezar no ton de agora.
+- **Detector en condicións difíciles** (`BTDetectorTest`): tramas con voz a máis de medio semitono do ton verdadeiro.
+
+  | caso | antes | agora |
+  |---|---|---|
+  | voz limpa | 1,2 % | 1,2 % |
+  | segundo harmónico dominante | 21,4 % | 2,0 % |
+  | sen fundamental | 0,9 % | 1,0 % |
+  | voz aireada (HNR ~5 dB) | 59,2 % | 13,9 % |
+  | ruído rosa a 10 dB | 11,1 % | 0,5 % |
+  | ruído rosa a 5 dB | 56,4 % | 4,7 % |
+  | reverberación longa (RT60 1,2 s) | 33,5 % | 25,4 % |
+  | voz grave, soprano, vibrato ancho | 0,5–1,2 % | 0,5–1,2 % |
+
+  A oitava decídese mirando a familia do val elixido (a metade, o dobre e os múltiplos ata 4, e con ruído os submúltiplos ata 1/5): gaña o período máis curto que sexa case tan fondo coma o máis fondo, co fondo medido no atraso fraccionario (Lagrange cúbica), que nas voces agudas cae entre dúas mostras. Seguindo unha nota, a oitava só cambia con probas claras, para non facer saltos soltos nas voces graves reais.
 - **Glisandos** sintéticos (ata 40 st/s), robot: tramas con a saída a máis de 1,1 semitonos da voz: 2,6–2,9 % (antes 16–23 %).
 - **Vibrato rápido con tremor** (6,2 Hz, ±45 c, tremor de período de 0,6 % ciclo a ciclo), robot: a nota queda plana a 2,4 c en Directo (antes 6,0 c), 0,6 c en Preciso e 0,1 c en Estudio.
 - **Condicións reais**: voz moi baixa (picos a −45 dBFS), ruído rosa a 20 dB de SNR, reverberación e 96 kHz: afina igual ca coa voz limpa (con ruído a 10 dB, algo menos).

@@ -39,6 +39,10 @@ jobs:
         run: ./build/BTRenderTest_artefacts/Release/BTRenderTest prueba.wav --json metricas.json
       - name: Métricas (sen retrocesos respecto da base)
         run: python3 tools/compara.py tools/metricas-base.json metricas.json
+      - name: Detector en condicións difíciles
+        run: |
+          ./build/BTDetectorTest_artefacts/Release/BTDetectorTest --json detector.json
+          python3 tools/compara.py tools/detector-base.json detector.json
       - name: pluginval (VST3, nivel 10)
         run: |
           curl -sSL -o pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
@@ -93,6 +97,10 @@ jobs:
         run: ./build/BTRenderTest_artefacts/Release/BTRenderTest.exe prueba.wav --json metricas.json
       - name: Métricas (sen retrocesos respecto da base)
         run: python tools/compara.py tools/metricas-base.json metricas.json
+      - name: Detector en condicións difíciles
+        run: |
+          ./build/BTDetectorTest_artefacts/Release/BTDetectorTest.exe --json detector.json
+          python tools/compara.py tools/detector-base.json detector.json
       - name: pluginval (VST3, nivel 10)
         run: |
           curl -sSL -o pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip
@@ -142,6 +150,10 @@ jobs:
         run: ./build/BTRenderTest_artefacts/Release/BTRenderTest prueba.wav --json metricas.json
       - name: Métricas (sen retrocesos respecto da base)
         run: python3 tools/compara.py tools/metricas-base.json metricas.json
+      - name: Detector en condicións difíciles
+        run: |
+          ./build/BTDetectorTest_artefacts/Release/BTDetectorTest --json detector.json
+          python3 tools/compara.py tools/detector-base.json detector.json
       - name: Voces reais (sen retrocesos respecto da base)
         run: |
           mkdir -p "$RUNNER_TEMP/voces" && cd "$RUNNER_TEMP/voces"
@@ -182,9 +194,11 @@ jobs:
       - name: Compilar a proba con sanitizadores
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DJUCE_DIR="$RUNNER_TEMP/JUCE" -DBARULLO_TESTS=ON -DBARULLO_SANITIZE=ON
-          cmake --build build --target BTRenderTest
+          cmake --build build --target BTRenderTest BTDetectorTest
       - name: Proba de son con sanitizadores
-        run: ./build/BTRenderTest_artefacts/RelWithDebInfo/BTRenderTest
+        run: |
+          ./build/BTRenderTest_artefacts/RelWithDebInfo/BTRenderTest
+          ./build/BTDetectorTest_artefacts/RelWithDebInfo/BTDetectorTest
 
   publicar:
     name: Publicar versión

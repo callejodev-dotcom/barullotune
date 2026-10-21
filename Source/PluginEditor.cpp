@@ -880,7 +880,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     // ---- corrección
     setupKnob (vel, "velocidade", "Velocidade",
                "Canto tarda en levar a voz á nota dentro de cada nota. 0 ms: ao momento. Para o efecto robot: velocidade e transición a 0 e vibrato a 0 %.");
-    setupKnob (transi, "transicion", U ("Transición").toRawUTF8(),
+    setupKnob (transi, "transicion", "Transición",
                "Canto tarda en pasar dunha nota á seguinte cando cambias de nota. Baixo, saltos secos; alto, portamentos suaves.");
     setupKnob (tol, "tolerancia", "Cents",
                "Desafinacións máis pequenas ca isto non se tocan: a voz queda como a cantaches. Desactivada á esquerda do todo.");
@@ -928,8 +928,8 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     setupKnob (vgDepth, "vibgen_fondo", "Fondo", "Vibrato xerado, enriba do da túa voz: canto sobe e baixa (en cents). Á esquerda do todo, sen vibrato xerado.");
     setupKnob (vgRate, "vibgen_velocidade", "Velocidade", "Vibrato xerado: cantas oscilacións por segundo.");
     setupKnob (vgDelay, "vibgen_retardo", "Retardo", "Vibrato xerado: canto tarda en entrar desde o comezo de cada nota (entra amodo, en 200 ms).");
-    setupKnob (vgVar, "vibgen_variacion", U ("Variación").toRawUTF8(), "Vibrato xerado: a velocidade e o fondo cambian amodo, coma nunha voz de verdade.");
-    setupKnob (vgTrem, "vibgen_tremolo", U ("Trémolo").toRawUTF8(), "Vibrato xerado: o nivel tamén oscila, ao mesmo compás.");
+    setupKnob (vgVar, "vibgen_variacion", "Variación", "Vibrato xerado: a velocidade e o fondo cambian amodo, coma nunha voz de verdade.");
+    setupKnob (vgTrem, "vibgen_tremolo", "Trémolo", "Vibrato xerado: o nivel tamén oscila, ao mesmo compás.");
     for (auto* k : { &vgRate, &vgDelay, &vgVar, &vgTrem }) k->slider.getProperties().set ("centre", k == &vgRate ? 5.5 : 0.0);
 
     // ---- armonías

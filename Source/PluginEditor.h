@@ -121,19 +121,8 @@ namespace ui
         float dragStartCents = 0;
     };
 
-    // un control que se pode escribir (clic dereito ou Cmd/Ctrl-clic) e mover fino (maiúsculas)
-    struct ValueSlider : public juce::Slider
-    {
-        ValueSlider (SliderStyle st = LinearBar) : juce::Slider (st, NoTextBox) { setWantsKeyboardFocus (true); }
-        void mouseDown (const juce::MouseEvent&) override;
-        void mouseUp (const juce::MouseEvent&) override;
-        bool keyPressed (const juce::KeyPress&) override;
-        void showEditor();
-        bool applyText (const juce::String& text);   // o texto coma no DAW («35 ms», «−3 dB»…)
-        juce::RangedAudioParameter* param = nullptr;
-        int normalSensitivity = 220;
-        std::unique_ptr<juce::TextEditor> editor;
-    };
+    // un control que se pode escribir (clic dereito ou Cmd/Ctrl-clic) e mover fino (maiúsculas): do núcleo
+    using ValueSlider = escoita::MandoEditable;
 
     struct Knob : public juce::Component
     {

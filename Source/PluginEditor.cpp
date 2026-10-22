@@ -888,69 +888,6 @@ Knob::Knob()
     addAndMakeVisible (slider);
 }
 
-// ---- escribir o valor e mover fino
-void ValueSlider::mouseDown (const juce::MouseEvent& e)
-{
-    if (e.mods.isPopupMenu() || e.mods.isCommandDown() || e.mods.isCtrlDown()) { showEditor(); return; }
-    normalSensitivity = getMouseDragSensitivity();
-    if (e.mods.isShiftDown()) setMouseDragSensitivity (normalSensitivity * 5);   // fino
-    juce::Slider::mouseDown (e);
-}
-
-void ValueSlider::mouseUp (const juce::MouseEvent& e)
-{
-    juce::Slider::mouseUp (e);
-    setMouseDragSensitivity (normalSensitivity);
-}
-
-bool ValueSlider::keyPressed (const juce::KeyPress& k)
-{
-    if (k.getKeyCode() == juce::KeyPress::returnKey) { showEditor(); return true; }   // intro: escribir o valor
-    return juce::Slider::keyPressed (k);
-}
-
-void ValueSlider::showEditor()
-{
-    if (param == nullptr || getParentComponent() == nullptr) return;
-    editor = std::make_unique<juce::TextEditor>();
-    editor->setJustification (juce::Justification::centred);
-    editor->setFont (semi (14.0f));
-    editor->setText (param->getCurrentValueAsText(), false);
-    editor->selectAll();
-    editor->setTitle (getTitle() + U (": escribir o valor"));
-    auto* parent = getParentComponent();
-    // (nun mando, enriba do seu visor)
-    const auto at = isRotary() ? getBounds().withTop (getBottom() - 22) : getBounds();
-    editor->setBounds (at.withSizeKeepingCentre (juce::jmax (78, getWidth()), 24));
-    parent->addAndMakeVisible (*editor);
-    editor->grabKeyboardFocus();
-    // (o punteiro seguro créase fóra: MSVC le mal o «this» nunha captura dun lambda dentro doutro)
-    const juce::Component::SafePointer<ValueSlider> safe (this);
-    auto finish = [this, safe] (bool apply)
-    {
-        if (editor == nullptr) return;
-        const auto text = editor->getText();
-        juce::MessageManager::callAsync ([sp = safe, text, apply]
-        {
-            if (sp == nullptr) return;
-            if (apply) sp->applyText (text);
-            sp->editor.reset();
-            sp->grabKeyboardFocus();
-        });
-    };
-    editor->onReturnKey = [finish] { finish (true); };
-    editor->onEscapeKey = [finish] { finish (false); };
-    editor->onFocusLost = [finish] { finish (true); };
-}
-
-bool ValueSlider::applyText (const juce::String& text)
-{
-    if (param == nullptr || text.trim().isEmpty()) return false;
-    auto t = text.trim().replaceCharacter (',', '.').replace (juce::String::fromUTF8 ("−"), "-");
-    setValue (param->convertFrom0to1 (param->getValueForText (t)), juce::sendNotificationSync);
-    return true;
-}
-
 // o mando e o seu visor ocupan todo menos o rótulo, debaixo
 void Knob::resized() { slider.setBounds (getLocalBounds().withTrimmedBottom (18)); }
 
@@ -1297,6 +1234,7 @@ void TuneEditor::setupKnob (ui::Knob& k, const char* id, const char* name, const
     k.name = U (name);
     k.slider.setTitle (k.name);
     k.slider.param = proc.params.getParameter (id);
+    k.slider.fonte = ui::semi (14.0f);
     k.att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.params, id, k.slider);
     if (auto* prm = proc.params.getParameter (id)) k.slider.setDoubleClickReturnValue (true, prm->convertFrom0to1 (prm->getDefaultValue()));
     k.slider.setTooltip (U (tip));
@@ -1306,6 +1244,7 @@ void TuneEditor::setupKnob (ui::Knob& k, const char* id, const char* name, const
 void TuneEditor::setupBar (ui::ValueSlider& s, const char* id, const juce::String& tip, const juce::String& title)
 {
     s.param = proc.params.getParameter (id);
+    s.fonte = ui::semi (14.0f);
     s.setTitle (title);
     s.setSliderStyle (juce::Slider::LinearBar);
     s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -1332,8 +1271,8 @@ void TuneEditor::setupSegment (juce::TextButton* b, int count, const char* param
 bool TuneEditor::typeValue (const juce::String& paramId, const juce::String& text)
 {
     for (auto* k : { &vel, &transi, &tol, &tolT, &flex, &human, &vib, &cant, &form, &trans, &air, &vgDepth, &vgRate, &vgDelay, &vgVar, &vgTrem, &principal, &la, &mest, &vol, &bend })
-        if (k->slider.param != nullptr && k->slider.param->paramID == paramId) return k->slider.applyText (text);
-    for (auto& row : hBar) for (auto& b : row) if (b.param != nullptr && b.param->paramID == paramId) return b.applyText (text);
+        if (k->slider.param != nullptr && k->slider.param->paramID == paramId) return k->slider.aplicarTexto (text);
+    for (auto& row : hBar) for (auto& b : row) if (b.param != nullptr && b.param->paramID == paramId) return b.aplicarTexto (text);
     return false;
 }
 

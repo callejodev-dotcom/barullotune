@@ -26,7 +26,7 @@ endif()
 
 # Núcleo común de Escoita: a versión fixada ou, se existe, a carpeta irmá ../escoita-nucleo
 # (para traballar no núcleo e probalo nos plugins á vez); tamén -DESCOITA_NUCLEO=<carpeta>
-set(ESCOITA_NUCLEO_VERSION "v0.2.0")
+set(ESCOITA_NUCLEO_VERSION "v0.3.0")
 if(NOT ESCOITA_NUCLEO AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../escoita-nucleo/escoita_nucleo")
   set(ESCOITA_NUCLEO "${CMAKE_CURRENT_SOURCE_DIR}/../escoita-nucleo")
 endif()

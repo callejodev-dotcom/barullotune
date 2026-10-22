@@ -224,6 +224,7 @@ public:
 
     // edición: o ton capturado sobre a liña de tempo do DAW e as notas editadas á man
     Edicion edicion;
+    void edicionTick();   // no fío da mensaxe (cada 100 ms; nas probas, á man)
     // as notas ás que vai a corrección en directo (para o destino das notas sen editar)
     Edicion::Permitida notaPermitida() const
     {
@@ -297,6 +298,19 @@ private:
     int scPos = 0, scCount = 0;
     std::array<std::atomic<float>, 12> chroma {};
     std::atomic<float> chromaHeard { 0 };
+
+    std::atomic<float>* pCapturar = nullptr;
+    // edición: a que chegou nun estado desde fóra do fío da mensaxe, á espera de cargarse
+    void cargarEdicion (const juce::ValueTree&);
+    juce::CriticalSection edicionPendenteLock;
+    juce::ValueTree edicionPendente;
+    uint16_t edicionMascara = 0;
+    struct ReloxoEdicion : juce::Timer
+    {
+        explicit ReloxoEdicion (TuneProcessor& x) : p (x) {}
+        void timerCallback() override { p.edicionTick(); }
+        TuneProcessor& p;
+    } reloxoEdicion { *this };
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
     std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman, *pPrincipal, *pHarmMode;

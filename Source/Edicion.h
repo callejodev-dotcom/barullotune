@@ -88,5 +88,7 @@ private:
     std::atomic<int> sucioIni { maxTramas }, sucioFin { -1 };
     std::atomic<int> numEditadas { 0 };
     int ultimaCapturada = -1;   // (fío de audio)
+    // as notas cámbianse no fío da mensaxe; o estado pode pedirse desde outro (gardar)
+    mutable juce::CriticalSection bloqueo;
     uint32_t seguinteId = 1;
 };

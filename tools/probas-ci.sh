@@ -26,6 +26,12 @@ echo "::group::Detector en condicións difíciles"
 $PY tools/compara.py tools/detector-base.json detector.json
 echo "::endgroup::"
 
+echo "::group::Coma nun DAW: o VST3 de verdade, coa edición (capturar, editar, volver tocar, abrir o proxecto, render, Estudio)"
+HT="build/BTHostTest_artefacts/$CONF/BTHostTest$EXE"
+VST3="build/BarulloTune_artefacts/$CONF/VST3/Barullo Tune.vst3"
+if [ "$SO" = linux ] && command -v xvfb-run > /dev/null; then xvfb-run -a "$HT" "$VST3"; else "$HT" "$VST3"; fi
+echo "::endgroup::"
+
 if [ "$SO" = linux ]; then
   echo "::group::Voces reais (sen retrocesos respecto da base)"
   V="${RUNNER_TEMP:-/tmp}/voces"

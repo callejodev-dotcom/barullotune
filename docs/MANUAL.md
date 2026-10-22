@@ -92,7 +92,8 @@ Para levar nota a nota a onde queiras, coma en Melodyne, pero sen ARA: vale en c
 - **Todas á escala**: cada nota, á nota da escala máis próxima e exacta (quedan editadas: xa non dependen de como cantes).
 - **Seguir o DAW**: a vista vai onde vai o DAW. Ao movela á man deixa de seguilo; dobre clic no baleiro, volve. Roda: moverse no tempo; Cmd/Ctrl + roda (ou − e +): achegar; maiúsculas + roda: arriba e abaixo.
 - **Borrar a captura** bórrao todo. Cada cambio pódese desfacer coas frechas da cabeceira.
-- A captura e as notas van co proxecto do DAW.
+- A captura e as notas van co proxecto do DAW (tamén se capturaches coa xanela pechada). Ao abrir o proxecto, **Capturar** vai apagado: tocar non pisa a toma.
+- **Capturar** é tamén un parámetro do DAW («Edición: capturar»): pódese automatizar ou asignar a un control.
 
 ## Escala, notas e afinación
 

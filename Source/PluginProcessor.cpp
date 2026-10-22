@@ -95,6 +95,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "rango", 1 }, U ("Voz"), voices, 6, choiceAttrs (voices).withAutomatable (false)));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "comparar", 1 }, U ("Comparar (voz orixinal)"), false));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, U ("Bypass"), false));
+    // edición: capturar o ton sobre a liña de tempo (tamén desde o DAW; ao abrir un proxecto vai apagado)
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { "edicion_capturar", 1 }, U ("Edición: capturar"), false));
 
     // aire: alento enriba da voz
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "aire", 1 }, U ("Aire"), NormalisableRange<float> (0.0f, 100.0f), 0.0f,
@@ -162,6 +164,8 @@ TuneProcessor::TuneProcessor()
       params (*this, &undo, "BarulloTune", layout())
 {
     pModo = params.getRawParameterValue ("modo");
+    pCapturar = params.getRawParameterValue ("edicion_capturar");
+    reloxoEdicion.startTimerHz (10);
     pTonica = params.getRawParameterValue ("tonica");
     pEscala = params.getRawParameterValue ("escala");
     pVel = params.getRawParameterValue ("velocidade");
@@ -476,7 +480,7 @@ escoita::Estado::Opcions TuneProcessor::opcionsEstado()
 {
     escoita::Estado::Opcions o;
     o.extension = "btpreset";
-    o.excluir = { "bypass", "comparar" };
+    o.excluir = { "bypass", "comparar", "edicion_capturar" };
     o.version = stateVersion;
     return o;
 }
@@ -778,6 +782,7 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     if (! tocando) t0 = -1.0;
     edicion.posicion = t0;
     if (t0 < 0) edicion.finCaptura();
+    edicion.capturando = pCapturar->load() > 0.5f;
     const bool capturar = t0 >= 0 && edicion.capturando.load();
     const bool forzar = t0 >= 0 && edicion.hayEditadas();
     const double dtMostra = 1.0 / getSampleRate();
@@ -956,7 +961,12 @@ void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
     params.state.setProperty ("ui", uiScale.load(), nullptr);
     params.state.setProperty ("tab", uiTab.load(), nullptr);
     auto st = params.copyState();
-    const auto ed = edicion.gardar();   // o ton capturado e as notas editadas
+    juce::ValueTree ed;   // o ton capturado e as notas editadas (ou os que aínda están por cargar)
+    {
+        const juce::ScopedLock sl (edicionPendenteLock);
+        if (edicionPendente.isValid()) ed = edicionPendente.createCopy();
+    }
+    if (! ed.isValid()) ed = edicion.gardar();
     if (ed.isValid()) st.appendChild (ed, nullptr);
     if (auto xml = st.createXml()) copyXmlToBinary (*xml, dest);
 }
@@ -992,7 +1002,7 @@ void TuneProcessor::setStateInformation (const void* data, int size)
     auto st = juce::ValueTree::fromXml (*xml);
     // a edición vai á parte (non é dos parámetros)
     const auto ed = st.getChildWithName ("EDICION");
-    edicion.cargar (ed, notaPermitida());
+    cargarEdicion (ed.createCopy());
     if (ed.isValid()) st.removeChild (ed, nullptr);
     const int from = (int) st.getProperty ("version", 0);
     migrateState (st, from);
@@ -1006,6 +1016,8 @@ void TuneProcessor::setStateInformation (const void* data, int size)
                 child.setProperty ("value", wp->convertFrom0to1 (wp->getDefaultValue()), nullptr);
                 st.appendChild (child, nullptr);
             }
+    // capturar vai sempre apagado ao abrir: tocar o proxecto non debe pisar a toma capturada
+    if (auto c = st.getChildWithProperty ("id", "edicion_capturar"); c.isValid()) c.setProperty ("value", 0.0, nullptr);
     params.replaceState (st);
     // o preset búscase polo nome (se cambia a orde da lista, segue sendo o mesmo)
     int pr = (int) st.getProperty ("preset", 0);
@@ -1020,6 +1032,30 @@ void TuneProcessor::setStateInformation (const void* data, int size)
 }
 
 juce::AudioProcessorEditor* TuneProcessor::createEditor() { return new TuneEditor (*this); }
+
+// ---- edición, no fío da mensaxe: a carga que quedou pendente, partir en notas o que se
+// capturou (tamén coa xanela pechada, para que o proxecto as garde) e, se cambiou a escala,
+// levar as notas sen editar á nota de agora
+void TuneProcessor::cargarEdicion (const juce::ValueTree& ed)
+{
+    auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+    if (mm == nullptr || mm->isThisTheMessageThread()) { edicion.cargar (ed, notaPermitida()); return; }
+    const juce::ScopedLock sl (edicionPendenteLock);
+    edicionPendente = ed.isValid() ? ed : juce::ValueTree ("EDICION");   // (baleira tamén: borra)
+}
+
+void TuneProcessor::edicionTick()
+{
+    juce::ValueTree ed;
+    {
+        const juce::ScopedLock sl (edicionPendenteLock);
+        std::swap (ed, edicionPendente);
+    }
+    if (ed.isValid()) edicion.cargar (ed, notaPermitida());
+    edicion.actualizar (notaPermitida());
+    const auto mascara = (uint16_t) (effectiveMask() | freeMask());
+    if (mascara != edicionMascara) { edicionMascara = mascara; edicion.redestinar (notaPermitida()); }
+}
 
 #ifndef BARULLO_NO_PLUGIN_ENTRY
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new TuneProcessor(); }

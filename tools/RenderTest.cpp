@@ -7,6 +7,7 @@
 #include "Aleatorio.h"
 #include <map>
 #include <cstring>
+#include <thread>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
@@ -1299,6 +1300,8 @@ int main (int argc, char** argv)
         for (int i = 0; i < a.getParameters().size(); ++i)
         {
             auto* pa = a.getParameters()[i]; auto* pb = b.getParameters()[i];
+            // (capturar vai sempre apagado ao abrir: proba á parte, na edición)
+            if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (pa); rp != nullptr && rp->paramID == "edicion_capturar") continue;
             if (std::abs (pa->getValue() - pb->getValue()) > 1.0e-4f)
             {
                 if (diff++ == 0) first = pa->getName (64) + ": " + pa->getText (pa->getValue(), 64) + " -> " + pb->getText (pb->getValue(), 64);
@@ -1686,9 +1689,9 @@ int main (int argc, char** argv)
             }
         };
         juce::AudioBuffer<float> antes, despois;
-        p.edicion.capturando = true;
+        setP (p, "edicion_capturar", 1);   // (o botón Capturar, ou o DAW: é un parámetro)
         pasada (antes);
-        p.edicion.capturando = false;
+        setP (p, "edicion_capturar", 0);
         p.edicion.actualizar (p.notaPermitida());
         // as notas da melodía, atopadas (polo centro de cada unha)
         const auto mel = melody();
@@ -1762,6 +1765,32 @@ int main (int argc, char** argv)
                      xeito == 0 ? "Directo" : "Estudio", atopadas, mel.size(), p.edicion.notas.size(), n5, n5a, n9, n9a, n2, n2a, estado ? "ben" : "MAL");
         check (xeito == 0 ? "edición: capturar, editar e volver tocar (Directo)" : "edición: capturar, editar e volver tocar (Estudio)",
                ids && atopadas >= 11 && sitio && estado);
+    }
+
+    // edición e o estado: cargado desde outro fío (hai DAW que o fan) queda pendente e cárgase
+    // no fío da mensaxe, sen perderse se se garda antes; e ao abrir, «capturar» vai apagado
+    {
+        TuneProcessor a;
+        a.edicion.capturando = true;
+        for (int k = 0; k < 200; ++k) a.edicion.capturar (1.0 + k * Edicion::trama, 60.3, true);
+        a.edicion.capturando = false;
+        a.edicion.actualizar (a.notaPermitida());
+        const bool unha = a.edicion.notas.size() == 1;
+        if (unha) a.edicion.editar (a.edicion.notas[0].id, 62, 0.0, a.notaPermitida());
+        setP (a, "edicion_capturar", 1);
+        juce::MemoryBlock mb; a.getStateInformation (mb);
+        TuneProcessor q;
+        std::thread fio ([&] { q.setStateInformation (mb.getData(), (int) mb.getSize()); });
+        fio.join();
+        const bool pendente = q.edicion.notas.empty();
+        juce::MemoryBlock mb2; q.getStateInformation (mb2);   // gardar antes de cargar: non se perde
+        TuneProcessor r; r.setStateInformation (mb2.getData(), (int) mb2.getSize());
+        q.edicionTick();
+        double c = 0;
+        const double t = 1.2;
+        const bool ok = unha && pendente && q.edicion.forzada (t, c) == 62 && r.edicion.forzada (t, c) == 62
+                        && q.params.getRawParameterValue ("edicion_capturar")->load() < 0.5f;
+        check ("edición: estado desde outro fío, e capturar apagado ao abrir", ok);
     }
 
     // automatización ao chou: todos os parámetros, bloques de 1 a 1024 mostras, MIDI, cambios

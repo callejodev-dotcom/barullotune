@@ -1584,7 +1584,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     edCapturar.setButtonText (U ("Capturar"));
     edCapturar.setTooltip (U ("Mentres está aceso e o DAW toca, a voz que entra gárdase sobre a liña de tempo e pártese en notas. "
                               "Volver capturar un anaco substitúe o que había nel."));
-    edCapturar.onClick = [this] { proc.edicion.capturando = ! proc.edicion.capturando.load(); rolo.repaint(); refresh(); };
+    edCapturar.onClick = [this] { proc.setParamPlain ("edicion_capturar", proc.edicion.capturando.load() ? 0.0f : 1.0f); proc.edicion.capturando = ! proc.edicion.capturando.load(); rolo.repaint(); refresh(); };
     edSeguir.setButtonText (U ("Seguir o DAW"));
     edSeguir.setTooltip (U ("A vista vai onde vai o DAW. Ao mover a vista á man, deixa de seguilo; dobre clic no baleiro, volve."));
     edSeguir.onClick = [this] { rolo.seguir = ! rolo.seguir; rolo.repaint(); refresh(); };
@@ -1874,7 +1874,7 @@ void TuneEditor::refresh()
     detect.repaint();
     // edición
     const auto* nota = proc.edicion.buscar (rolo.seleccionada);
-    edCapturar.setToggleState (proc.edicion.capturando.load(), juce::dontSendNotification);
+    edCapturar.setToggleState (proc.params.getRawParameterValue ("edicion_capturar")->load() > 0.5f, juce::dontSendNotification);
     edSeguir.setToggleState (rolo.seguir, juce::dontSendNotification);
     edEscala.setEnabled (! proc.edicion.notas.empty());
     edRestaurar.setEnabled (nota != nullptr && nota->editada);

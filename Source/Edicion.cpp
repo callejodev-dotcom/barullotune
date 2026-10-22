@@ -71,6 +71,7 @@ void Edicion::borrarForzado (const Nota& n)
 // sen voz de 20 ms ou máis acábaa. As notas de menos de 60 ms xúntanse coa do lado.
 bool Edicion::actualizar (const Permitida& permitida)
 {
+    const juce::ScopedLock sl (bloqueo);
     int a = sucioIni.exchange (maxTramas), b = sucioFin.exchange (-1);
     if (a > b) return false;
     // ata as notas que tocan o tramo e os bordes da voz (para partir tramos enteiros)
@@ -175,12 +176,14 @@ bool Edicion::actualizar (const Permitida& permitida)
 
 void Edicion::redestinar (const Permitida& permitida)
 {
+    const juce::ScopedLock sl (bloqueo);
     for (auto& n : notas) if (! n.editada) { n.destino = destinoPorDefecto (n.centro, permitida); n.cents = 0; }
     ++revision;
 }
 
 void Edicion::editar (uint32_t id, int destino, double cents, const Permitida&)
 {
+    const juce::ScopedLock sl (bloqueo);
     for (auto& n : notas)
         if (n.id == id)
         {
@@ -196,6 +199,7 @@ void Edicion::editar (uint32_t id, int destino, double cents, const Permitida&)
 
 void Edicion::restaurar (uint32_t id, const Permitida& permitida)
 {
+    const juce::ScopedLock sl (bloqueo);
     for (auto& n : notas)
         if (n.id == id)
         {
@@ -210,6 +214,7 @@ void Edicion::restaurar (uint32_t id, const Permitida& permitida)
 
 void Edicion::borrar()
 {
+    const juce::ScopedLock sl (bloqueo);
     for (auto& n : notas) if (n.editada) borrarForzado (n);
     notas.clear();
     numEditadas = 0;
@@ -223,6 +228,7 @@ void Edicion::borrar()
 // ---- estado: o ton capturado (cents en int16, base64) e as notas
 juce::ValueTree Edicion::gardar() const
 {
+    const juce::ScopedLock sl (bloqueo);
     if (baleira()) return {};
     juce::ValueTree t ("EDICION");
     const int a = primeira.load(), b = ultima.load();
@@ -251,6 +257,7 @@ juce::ValueTree Edicion::gardar() const
 
 void Edicion::cargar (const juce::ValueTree& t, const Permitida& permitida)
 {
+    const juce::ScopedLock sl (bloqueo);
     borrar();
     if (! t.hasType ("EDICION")) return;
     // (vén de fóra: todo se comproba)

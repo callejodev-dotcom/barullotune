@@ -171,6 +171,17 @@ if(BARULLO_TESTS)
     target_link_options(BTRenderTest PRIVATE -fsanitize=address,undefined)
   endif()
 
+  # Proba coma un DAW: o VST3 de verdade, cargado e tocado sobre unha liña de tempo
+  juce_add_console_app(BTHostTest PRODUCT_NAME "BTHostTest")
+  target_sources(BTHostTest PRIVATE tools/HostTest.cpp)
+  target_compile_definitions(BTHostTest PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+  target_link_libraries(BTHostTest PRIVATE juce::juce_audio_processors juce::juce_audio_utils
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+  if(MSVC)
+    target_compile_options(BTHostTest PRIVATE /utf-8 /bigobj)
+  endif()
+  add_dependencies(BTHostTest BarulloTune_VST3)
+
   # Proba do detector en condicións difíciles (só o motor, sen JUCE)
   add_executable(BTDetectorTest tools/DetectorTest.cpp)
   target_include_directories(BTDetectorTest PRIVATE Source "${ESCOITA_NUCLEO_DIR}/probas")

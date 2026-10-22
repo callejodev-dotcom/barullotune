@@ -335,6 +335,15 @@ int main (int argc, char** argv)
     std::setvbuf (stdout, nullptr, _IONBF, 0);   // se casca no CI, que se vexa ata onde chegou
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 3 && juce::String (argv[1]) == "--file") return processFile (argc, argv);
+    if (argc > 2 && juce::String (argv[1]) == "--voz")   // a voz sintética das probas, sen tocar (para demos e para --file)
+    {
+        std::vector<double> tr;
+        const auto v = makeVoice (tr);
+        juce::AudioBuffer<float> b (1, (int) v.size());
+        for (int i = 0; i < (int) v.size(); ++i) b.setSample (0, i, v[(size_t) i]);
+        writeWav (juce::File { juce::String (argv[2]) }, b);
+        return 0;
+    }
     if (argc > 1 && juce::String (argv[1]) == "--cpu") { cpuBench (20.0); return 0; }
     // --snapshot captura.png [pestana 0–3; 4 o informe; 5 a edición]
     if (argc > 2 && juce::String (argv[1]) == "--snapshot") { snapshot (juce::File { juce::String (argv[2]) }, argc > 3 ? juce::String (argv[3]).getIntValue() : 0); return 0; }

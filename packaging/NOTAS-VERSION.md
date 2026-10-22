@@ -2,6 +2,14 @@
 
 Unha ferramenta de [Escoita](https://www.escoita.link). Manual: [docs/MANUAL.md](https://github.com/callejodev-dotcom/barullotune/blob/main/docs/MANUAL.md).
 
+## Novidades na 0.3.0
+
+- **Interface nova**, coma un aparello de estudio e coa marca de Escoita: paneis en relevo, teclas con piloto, visores, mandos cun anel de luz e pantallas de cristal.
+- **Afinador de agulla**: laranxa a túa voz, crema a afinada, cunha zona verde de ±5 cents; ao lado, o ton dos últimos segundos, máis ancho, e a latencia de verdade.
+- **Teclado de cinco oitavas** (Do1–Do6) con teclas de verdade: a cor di se a nota está na escala, fóra ou libre, e a que cantas acéndese.
+- **Medidores de LED** de entrada e saída, e tipografías Montserrat e Inter.
+- **Voz aguda e aireada**: o detector xa non baixa dúas oitavas (erros 4,7 → 1,4 %).
+
 ## Novidades na 0.2.2
 
 - **Arranxo importante**: cunha voz moi aireada e con ruído, a 0.2.1 podía calcular un período negativo e quedar colgada (e con ela o DAW). Xa non: o período sempre queda dentro do rango e a colocación das marcas de ciclo non pode quedar nun bucle. Un banco de 240 casos difíciles ao chou daba o fallo en 31; agora en ningún.

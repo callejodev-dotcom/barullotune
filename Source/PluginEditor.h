@@ -4,22 +4,33 @@
 
 namespace ui
 {
-    // Noite de Vigo: o azul mariño de Escoita, a luz de sodio das farolas para a túa voz
-    // e a escuma do mar para a voz afinada.
+    // Os de Escoita: o azul mariño da noite de Vigo, a crema da súa letra e a luz laranxa,
+    // nun aparello de estudio (paneis en relevo, pantallas de cristal, visores dourados)
     namespace col
     {
-        const juce::Colour noite   { 0xff0c111f };   // fondo (o da web de Escoita)
-        const juce::Colour fondo2  { 0xff10172a };   // paneis
-        const juce::Colour carril  { 0xff172038 };   // carrís das notas da escala
-        const juce::Colour lina    { 0xff28314b };   // liñas e bordos
-        const juce::Colour neboa   { 0xff8d97b0 };   // texto secundario
-        const juce::Colour escuma  { 0xffeef3ff };   // texto e voz afinada
-        const juce::Colour sodio   { 0xfff2a23a };   // a túa voz e os controis activos
+        const juce::Colour noite    { 0xff0c111f };   // fondo (o da web de Escoita)
+        const juce::Colour crema    { 0xfffff7c1 };   // texto e voz afinada (o da web)
+        const juce::Colour crema2   { 0xffbdb792 };   // texto secundario
+        const juce::Colour crema3   { 0xff857f67 };   // rótulos discretos
+        const juce::Colour laranxa  { 0xffe08b16 };   // a túa voz, o activo, os LED
+        const juce::Colour ouro     { 0xffedba23 };   // os visores
+        const juce::Colour verde    { 0xff9dc6a0 };   // afinado e niveis
+        const juce::Colour panel1   { 0xff1c2540 }, panel2 { 0xff111830 };    // paneis en relevo
+        const juce::Colour tecla1   { 0xff27314f }, tecla2 { 0xff1a2239 };    // teclas
+        const juce::Colour visor    { 0xff070b16 };   // visores e pozos
+        const juce::Colour cristal1 { 0xff142046 }, cristal2 { 0xff070c1c };  // as pantallas
+        const juce::Colour lina     { 0xff2a3350 };   // liñas
+        // (os nomes de antes)
+        const juce::Colour escuma = crema, sodio = laranxa, neboa = crema2, fondo2 = panel2;
     }
 
-    juce::Font body (float size);
-    juce::Font semi (float size);
-    juce::Font cond (float size);
+    juce::Font body (float size);    // Inter: texto corrido
+    juce::Font semi (float size);    // Montserrat SemiBold: valores
+    juce::Font cond (float size);    // Montserrat Bold: a nota, títulos
+    // Montserrat en maiúsculas espaciadas (os rótulos, coma na web de Escoita)
+    juce::Font caps (float size, float tracking = 0.18f);
+    juce::String upper (const juce::String&);   // maiúsculas, tamén con acentos
+    void drawCaps (juce::Graphics&, const juce::String&, juce::Rectangle<float>, juce::Justification, float size, float tracking = 0.18f);
 
     struct Look : juce::LookAndFeel_V4
     {
@@ -32,14 +43,20 @@ namespace ui
         void drawTooltip (juce::Graphics&, const juce::String&, int w, int h) override;
         juce::Rectangle<int> getTooltipBounds (const juce::String&, juce::Point<int>, juce::Rectangle<int>) override;
         void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
-        juce::Font getComboBoxFont (juce::ComboBox&) override { return semi (16.0f); }
+        juce::Font getComboBoxFont (juce::ComboBox& b) override { return caps (juce::jmin (13.5f, (float) b.getHeight() * 0.5f), 0.1f); }
         juce::Font getPopupMenuFont() override { return body (16.0f); }
         void drawLinearSlider (juce::Graphics&, int x, int y, int w, int h, float pos, float minPos, float maxPos, juce::Slider::SliderStyle, juce::Slider&) override;
         void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
         void drawPopupMenuBackground (juce::Graphics&, int w, int h) override;
     };
 
-    // a pantalla central: medidores de nivel, a nota cun arco de cents e o rastro do ton
+    // pezas do aparello (tamén para o editor)
+    void paintPanel (juce::Graphics&, juce::Rectangle<float>, float radius);
+    void paintWell (juce::Graphics&, juce::Rectangle<float>, float radius);
+    void paintGlass (juce::Graphics&, juce::Rectangle<float>, float radius);
+    void paintGlassShine (juce::Graphics&, juce::Rectangle<float>, float radius);
+
+    // a pantalla central: medidores de nivel, a nota cun medidor de agulla e o rastro do ton
     class Display : public juce::Component, public juce::SettableTooltipClient
     {
     public:
@@ -75,7 +92,7 @@ namespace ui
         juce::TextButton reset, close;
     };
 
-    // o teclado: unha tira enriba de cada tecla di se a nota está na escala, fóra ou libre.
+    // o teclado: cinco oitavas; a cor de cada tecla di se a nota está na escala, fóra ou libre.
     // Coa afinación Personalizada, maiúsculas + arrastrar en vertical cambia os cents da nota
     class Keyboard : public juce::Component, public juce::TooltipClient
     {
@@ -91,7 +108,7 @@ namespace ui
         void focusGained (FocusChangeType) override { if (focusNote < 0) focusNote = 60; announce(); repaint(); }
         void focusLost (FocusChangeType) override { repaint(); }
         static constexpr int lo = 36, hi = 96;   // Do1 … Do6
-        static constexpr float stripH = 12.0f;
+        static constexpr float bedH = 4.0f;      // o feltro de enriba das teclas
     private:
         int noteAt (juce::Point<float>) const;
         juce::Rectangle<float> keyRect (int note) const;
@@ -141,7 +158,7 @@ public:
     bool typeValue (const juce::String& paramId, const juce::String& text);   // para as probas: escribir nun mando
     ui::Keyboard& keyboardForTests() { return keyboard; }
     void showPractice (bool show) { if (show != practicePanel.isVisible() && practiceBtn.onClick) practiceBtn.onClick(); }
-    static constexpr int W = 1040, H = 692;
+    static constexpr int W = 1040, H = 744;
     enum Tab { TabCorrection = 0, TabVoice, TabHarmony, TabOutput, numTabs };
 
 private:
@@ -221,6 +238,8 @@ private:
     juce::TextButton detect, scl, modeBtn[3];
     std::unique_ptr<juce::FileChooser> chooser;
     juce::String lastPresetList;
+    // os grupos de mandos de cada pestana (o rótulo e o seu ancho), para debuxalos
+    std::vector<std::pair<juce::Rectangle<int>, juce::String>> groups[numTabs];
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TuneEditor)
 };

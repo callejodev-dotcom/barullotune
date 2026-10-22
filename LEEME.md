@@ -20,8 +20,8 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 
 ## Que ten
 
-- **Pantalla**: a nota á que vai a voz, cun arco de −50 a +50 cents (agulla laranxa: a túa voz; branca: a afinada), os hercios e os cents que corrixe, os medidores de entrada e saída, e o ton dos últimos segundos.
-- **Teclado**: cinco oitavas, cunha tira enriba de cada tecla que di se a nota está **na escala**, **fóra** ou **libre** (cantando nela non se corrixe). Clic para poñer ou quitar; clic dereito para deixala libre; coa afinación Personalizada, maiúsculas + arrastrar en vertical cambia os cents da nota (vense na tira). O que queda fóra do rango da voz vese máis escuro; a nota á que vai a voz acéndese.
+- **Pantalla**: a nota á que vai a voz, cun medidor de agulla de −50 a +50 cents (laranxa: a túa voz; crema: a afinada), os hercios, os cents que corrixe e a latencia, os medidores de entrada e saída, e o ton dos últimos segundos.
+- **Teclado**: cinco oitavas; a cor de cada tecla di se a nota está **na escala**, **fóra** ou **libre** (cantando nela non se corrixe). Clic para poñer ou quitar; clic dereito para deixala libre; coa afinación Personalizada, maiúsculas + arrastrar en vertical cambia os cents da nota (vense na tecla). O que queda fóra do rango da voz vese máis escuro; a nota á que vai a voz acéndese.
 - **Mandos en catro pestanas**: Corrección (velocidade, transición, tolerancia, flexibilidade, humanizar, vibrato, cantidade), Voz (formantes, transpor, aire e o vibrato xerado), Armonías (a voz principal e unha fila por armonía: intervalo, nivel, panorama, desafinar, atraso e formantes) e Saída (La, mestura, volume, bend e notas MIDI).
 - **Accesibilidade e teclado**: o tabulador percorre os controis (co foco marcado en laranxa) e as frechas móvenos; cada control ten nome para os lectores de pantalla e a pantalla anuncia a nota e canto corrixe. Clic dereito (ou Cmd/Ctrl-clic, ou intro) nun mando para escribir o valor («35 ms», «−3,5 dB», «I40»…); maiúsculas ao arrastrar, fino. O teclado da escala vai sen rato: frechas (arriba e abaixo, oitavas), espazo para poñer ou quitar, F para libre e, coa afinación Personalizada, maiúsculas + arriba/abaixo para os cents.
 - **Cabeceira**: presets (os de fábrica e os teus; gardar o actual, abrir a carpeta, copiar A en B), **A/B**, comparar, **desfacer e refacer**, e o xeito.
@@ -142,4 +142,4 @@ A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 
 Barullo Tune é software libre: publícase baixo a licenza **GNU Affero General Public License v3.0** (ficheiro `LICENSE`). Podes usalo, estudalo, modificalo e compartilo; se distribúes unha versión modificada, ten que ir co seu código e baixo a mesma licenza.
 
-Usa JUCE 8 baixo a súa licenza AGPLv3 e, para o formato CLAP, clap-juce-extensions (licenza MIT). A tipografía Barlow vai coa súa licenza OFL (`Resources/Barlow-OFL.txt`). O instalador de Windows en galego usa a tradución non oficial de Inno Setup feita por MdL (`packaging/Galician.isl`).
+Usa JUCE 8 baixo a súa licenza AGPLv3 e, para o formato CLAP, clap-juce-extensions (licenza MIT). As tipografías Montserrat e Inter van coas súas licenzas OFL (`Resources/Montserrat-OFL.txt` e `Resources/Inter-OFL.txt`). O instalador de Windows en galego usa a tradución non oficial de Inno Setup feita por MdL (`packaging/Galician.isl`).

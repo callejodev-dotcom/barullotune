@@ -217,7 +217,9 @@ static void snapshot (const juce::File& png, int tab)
         if ((pos / 512) % 3 == 0) te->tick();
     }
     te->tick();
-    auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.5f);
+    // (BT_SCALE: a escala da captura; por defecto 1,5, coma unha pantalla retina)
+    const float scale = std::getenv ("BT_SCALE") != nullptr ? (float) std::atof (std::getenv ("BT_SCALE")) : 1.5f;
+    auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, scale);
     png.deleteFile();
     juce::FileOutputStream os (png);
     juce::PNGImageFormat().writeImageToStream (img, os);

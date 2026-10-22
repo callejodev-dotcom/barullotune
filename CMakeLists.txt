@@ -77,11 +77,11 @@ if(BARULLO_CLAP)
     CLAP_SUPPORT_URL "https://www.escoita.link")
 endif()
 
-# tipografía Barlow (licencia OFL, ver Resources/Barlow-OFL.txt)
+# tipografías Montserrat e Inter (licenza OFL, ver Resources/Montserrat-OFL.txt e Inter-OFL.txt)
 juce_add_binary_data(BTFonts SOURCES
-  Resources/BarlowSemiCondensed-Medium.ttf
-  Resources/BarlowSemiCondensed-SemiBold.ttf
-  Resources/BarlowCondensed-SemiBold.ttf)
+  Resources/Inter-Medium.ttf
+  Resources/Montserrat-SemiBold.ttf
+  Resources/Montserrat-Bold.ttf)
 
 target_sources(BarulloTune PRIVATE
   Source/PluginProcessor.cpp

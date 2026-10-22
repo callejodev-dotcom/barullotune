@@ -9,14 +9,14 @@ Unha ferramenta de [Escoita](https://www.escoita.link).
 ## Para empezar, en tres pasos
 
 1. **Pon Barullo Tune na pista da voz** (VST3, AU, CLAP ou LV2), ou abre a aplicación.
-2. **Escolle a tonalidade**: tónica e escala na fila de baixo. Se non a sabes, pulsa **Detectar** e canta uns segundos; se mandas a base á entrada lateral «Acompañamento», abonda con que soe a base.
+2. **Escolle a tonalidade**: tónica e escala na fila de enriba do teclado. Se non a sabes, pulsa **Detectar** (enriba dos mandos, á dereita) e canta uns segundos; se mandas a base á entrada lateral «Acompañamento», abonda con que soe a base.
 3. **Escolle un preset**: «Natural» para unha corrección que non se nota, «Robot» para o efecto.
 
 Xa está. O resto é afinar o carácter.
 
 ## Os tres xeitos
 
-Arriba á dereita:
+Na cabeceira, á dereita:
 
 | Xeito | Latencia | Para que |
 |---|---|---|
@@ -28,8 +28,9 @@ O DAW compensa a latencia ao reproducir. Directo declara 0, así que non atrasa 
 
 ## A pantalla
 
-- **Á esquerda**, a nota á que vai a voz. A agulla laranxa é a túa voz e a branca a afinada, en cents (−50 a +50).
-- **Á dereita**, o ton nos últimos segundos: laranxa a túa voz, branco a afinada.
+- **Á esquerda**, a nota á que vai a voz. A agulla laranxa é a túa voz e a crema a afinada, en cents (−50 a +50); a zona verde é ±5 cents. Enriba, a latencia de verdade.
+- **Á dereita**, o ton nos últimos segundos: laranxa a túa voz, crema a afinada.
+- **Nos lados**, o nivel de entrada (In) e de saída (Out).
 - **Informe**: como afinas ti. Mira «Practicar», máis abaixo.
 
 ## Corrección
@@ -64,7 +65,7 @@ Ata catro voces novas a partir da túa. Cada fila é unha armonía:
 - **intervalo**: de oitava abaixo a oitava arriba, en graos da escala (a terceira dunha nota é a nota da escala dous pasos arriba: maior ou menor segundo caia);
 - **nivel**, **panorama**, **desafinar** (uns cents, para que non soe pegada á principal), **atraso** (uns ms, coma alguén que canta contigo) e **formantes** (outra persoa).
 
-Arriba á dereita, o modo: **Escala** (cada armonía no seu intervalo) ou **Acorde MIDI** (cada armonía vai a unha das teclas que toques, de grave a aguda). **Principal** é o nivel da túa voz: á esquerda do todo, quedas só coas armonías (para gravalas nunha pista aparte).
+Abaixo á dereita, o modo: **Escala** (cada armonía no seu intervalo) ou **Acorde MIDI** (cada armonía vai a unha das teclas que toques, de grave a aguda). **Principal** é o nivel da túa voz: á esquerda do todo, quedas só coas armonías (para gravalas nunha pista aparte).
 
 As armonías levan a mesma corrección e a mesma expresión ca a túa voz (vibrato, arrastres). Sen ton (consoantes) cállanse.
 
@@ -80,7 +81,7 @@ As armonías levan a mesma corrección e a mesma expresión ca a túa voz (vibra
 
 ## Escala, notas e afinación
 
-A fila de baixo:
+Enriba dos mandos, á dereita, o modo e **Detectar**; na fila de enriba do teclado, a tonalidade, a voz e a afinación:
 
 - **Escala / MIDI escala / MIDI nota**. Con **Escala**, a voz vai á nota máis próxima da escala. Con **MIDI escala**, as teclas que toques fan de escala. Con **MIDI nota**, a voz vai á tecla exacta e a roda de pitch bend dóbraa. Compatible con **MPE**: cada nota co bend da súa canle.
 - **Tónica e escala**: hai vinte escalas, da cromática á frixia dominante do flamenco, máis a personalizada.
@@ -92,7 +93,7 @@ A fila de baixo:
   - **MTS-ESP**: a que diga o mestre de MTS-ESP, ou as mensaxes MIDI de afinación.
 - **.scl**: importa unha escala de Scala, coas súas notas e os seus cents desde a tónica.
 
-**O teclado**: a tira de enriba de cada tecla di se a nota está na escala (branca), fóra (escura) ou libre (laranxa: cantando nela non se corrixe).
+**O teclado**: cinco oitavas, de Do1 a Do6. A cor de cada tecla di se a nota está na escala (crema; as negras, negras), fóra (gris) ou libre (con raias laranxa: cantando nela non se corrixe). A nota que cantas acéndese en laranxa, e o que queda fóra do rango da voz vese máis escuro.
 
 - Clic: pon ou quita a nota da escala, en todas as oitavas.
 - Clic dereito: déixaa libre.

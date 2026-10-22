@@ -72,7 +72,7 @@ private:
 
         double energy = 0;
         for (int j = 0; j < win; ++j) energy += (double) at (j) * at (j);
-        if (energy / win < gate) { voiced = false; pending = 0; clarity = 0; anchor = 0; commonFrom = 0; return; }
+        if (energy / win < gate) { voiced = false; pending = 0; pendingN = 0; clarity = 0; anchor = 0; commonFrom = 0; return; }
 
         d[0] = 1.0; cum[0] = 0;
         double run = 0;
@@ -116,7 +116,7 @@ private:
             if (best >= 0 && global > 0 && std::lround ((double) best / global) >= 3 && multipleOf ((double) best, (double) global)) best = global;
         }
         const bool following = best >= 0;
-        bool combed = false;
+        bool combed = false, weak = false;
         if (best < 0) best = global;
         if (best < 0)
         {
@@ -157,6 +157,10 @@ private:
                     if (pick > 0 && combMean - comb[(size_t) pick] < combNear) pick = -1;
                 }
                 if (pick < 0 && cb > 0 && prom >= combNew) pick = cb;
+                // o comezo dunha nota moi aireada ou con moito ruído non chega ao 0,5 pero
+                // repítese: vale con menos se tres lecturas seguidas din a mesma nota (o ruído
+                // non se repite así). Só ao comezo: unha nota que xa soa non cambia por isto
+                else if (pick < 0 && cb > 0 && ! voiced && prom >= combWeak) { pick = cb; weak = true; }
                 if (pick > 0) { best = pick; combed = true; }
             }
             if (best < 0 || (d[(size_t) best] > 0.35 && ! combed))
@@ -211,7 +215,9 @@ private:
         if (! voiced)
         {
             // comezo de nota: fai falta que dúas lecturas seguidas coincidan (±0,6 semitonos)
-            if (pending > 0 && std::abs (std::log2 (p / pending)) < 0.05) { period = p; voiced = true; misses = 0; }
+            // (cunha proba feble, tres)
+            pendingN = pending > 0 && std::abs (std::log2 (p / pending)) < 0.05 ? pendingN + 1 : 1;
+            if (pendingN >= (weak ? 3 : 2)) { period = p; voiced = true; misses = 0; }
             pending = p;
             return;
         }
@@ -416,13 +422,14 @@ private:
     // canto por baixo do resto da curva ten que quedar a media dos múltiplos: arredor da
     // nota que se segue, e para unha nota nova (voz aireada: erros 8,2 -> 2,6 %, tramas
     // perdidas 16 -> 11 %; máis baixo, a guitarra de fondo e as voces graves daban notas)
-    static constexpr double combNear = 0.4, combNew = 0.5;
+    static constexpr double combNear = 0.4, combNew = 0.5, combWeak = 0.42;
     int64_t frameStart = 0;
     Biquad lp1, lp2;
     double hp = 0, hpPrev = 0;
     int64_t pos = 0;
     int dcount = 0, hcount = 0;
     double pending = 0;
+    int pendingN = 0;                  // lecturas seguidas que coinciden ao comezo
     int misses = 0;
     double anchor = 0;                 // período (diezmado) da última lectura clara
     int holds = 0;

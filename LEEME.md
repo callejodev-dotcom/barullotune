@@ -133,7 +133,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 ## Publicar unha versión
 
 ```
-git tag v0.3.0 && git push origin v0.3.0
+git tag v0.4.0 && git push origin v0.4.0
 ```
 
 A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.

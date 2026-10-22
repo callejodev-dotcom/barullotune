@@ -2,6 +2,13 @@
 
 Unha ferramenta de [Escoita](https://www.escoita.link). Manual: [docs/MANUAL.md](https://github.com/callejodev-dotcom/barullotune/blob/main/docs/MANUAL.md).
 
+## Novidades na 0.4.0
+
+- **Edición, nota a nota** (pestana nova): acende **Capturar** e toca a toma no DAW; a voz aparece sobre a liña de tempo, partida en notas. Arrastra cada nota a onde queiras (con Alt, en cents) e, ao volver tocar, vai alí; as outras corríxense en directo, coma sempre. Sen ARA: vale en calquera DAW, tamén en Ableton. Vai co proxecto e todo se pode desfacer. «Capturar» é tamén un parámetro do DAW e, ao abrir un proxecto, vai sempre apagado.
+- **Detector máis fino coa voz aireada**: cunha voz moi aireada e con ruído pérdense menos tramas (40 → 35 %); na voz aguda aireada, os erros baixan de 1,4 a 0,2 %; nas voces reais hai menos saltos (Directo: 0,47 → 0,38).
+- **O aviso das versións novas, tamén en Linux** (co curl ou o wget do sistema).
+- Probado coma nun DAW: o VST3 cargado sobre unha liña de tempo (capturar, editar, abrir o proxecto de novo, render sen tempo real e Estudio), en Mac, Windows e Linux.
+
 ## Novidades na 0.3.0
 
 - **Interface nova**, coma un aparello de estudio e coa marca de Escoita: paneis en relevo, teclas con piloto, visores, mandos cun anel de luz e pantallas de cristal.

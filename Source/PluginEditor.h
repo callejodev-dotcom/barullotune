@@ -93,6 +93,56 @@ namespace ui
         juce::TextButton reset, close;
     };
 
+    // Edición: o rolo das notas capturadas, sobre a liña de tempo do DAW. Cada nota é un
+    // bloque á altura á que vai (o ton cantado, a liña laranxa); arrastrala arriba ou abaixo
+    // lévaa a outra nota (con Alt, cents), dobre clic devólvea a como estaba. Segue o DAW.
+    class RoloNotas : public juce::Component, public juce::TooltipClient
+    {
+    public:
+        explicit RoloNotas (TuneProcessor& p);
+        void paint (juce::Graphics&) override;
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+        void mouseDoubleClick (const juce::MouseEvent&) override;
+        void mouseMove (const juce::MouseEvent&) override;
+        void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+        bool keyPressed (const juce::KeyPress&) override;
+        juce::String getTooltip() override;
+        void tick();                                  // 30 veces por segundo: notas novas e o DAW
+        // accións (cada unha, un paso de desfacer)
+        void restaurarSeleccionada();
+        void todasAEscala();
+        void borrarCaptura();
+        void zoom (double factor);
+        bool seguir = true;                           // a vista vai co DAW
+        uint32_t seleccionada = 0;
+        std::function<void()> onSeleccion;            // (a interface amosa a nota escollida)
+        double segundos = 8.0;                        // o que se ve
+    private:
+        struct Vista { juce::Rectangle<float> area; double t0, seg, mLo, mHi; };
+        Vista vista() const;
+        float xDe (const Vista&, double t) const;
+        double tDe (const Vista&, float x) const;
+        float yDe (const Vista&, double m) const;
+        const Edicion::Nota* notaEn (juce::Point<float>) const;
+        void editarCon (uint32_t id, int destino, double cents, bool editada, int destinoAntes, double centsAntes, bool editadaAntes);
+        TuneProcessor& proc;
+        double t0 = 0.0, centroM = 60.0, altoM = 14.0;   // a vista: comezo (s), centro e alto (semitonos)
+        bool vManual = false;
+        // arrastre
+        uint32_t arrastrando = 0;
+        int destino0 = 0; double cents0 = 0; bool editada0 = false;
+        float yInicio = 0;
+        bool movendoVista = false; double t0Inicio = 0;
+        double ultimaPos = -2.0;
+        uint32_t ultimaRevision = 0, hover = 0;
+        uint16_t ultimaMascara = 0xffff;
+    public:
+        // (estático: o desfacer vive no procesador e pode durar máis ca a xanela)
+        static void aplicar (TuneProcessor&, uint32_t id, int destino, double cents, bool editada);
+    };
+
     // o teclado: cinco oitavas; a cor de cada tecla di se a nota está na escala, fóra ou libre.
     // Coa afinación Personalizada, maiúsculas + arrastrar en vertical cambia os cents da nota
     class Keyboard : public juce::Component, public juce::TooltipClient
@@ -149,7 +199,8 @@ public:
     ui::Keyboard& keyboardForTests() { return keyboard; }
     void showPractice (bool show) { if (show != practicePanel.isVisible() && practiceBtn.onClick) practiceBtn.onClick(); }
     static constexpr int W = 1040, H = 744;
-    enum Tab { TabCorrection = 0, TabVoice, TabHarmony, TabOutput, numTabs };
+    enum Tab { TabCorrection = 0, TabVoice, TabHarmony, TabOutput, TabEdit, numTabs };
+    void demoEdicion();                // para as capturas: unha toma capturada con dúas notas editadas
 
 private:
     // todo vai debuxado a tamaño fixo nun lenzo que despois se escala co tamaño da xanela
@@ -229,6 +280,9 @@ private:
     // saída
     ui::Knob la, mest, vol, bend;
     juce::TextButton midiOut;
+    // edición
+    ui::RoloNotas rolo { proc };
+    juce::TextButton edCapturar, edSeguir, edEscala, edRestaurar, edBorrar, edZoomMenos, edZoomMais;
     // modo, tonalidade, voz e afinación
     juce::ComboBox tonica, escala, voz, afin;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicaAtt, escalaAtt, vozAtt, afinAtt;

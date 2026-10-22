@@ -79,6 +79,21 @@ As armonías levan a mesma corrección e a mesma expresión ca a túa voz (vibra
 - **Bend**: canto dobra a roda de pitch bend en MIDI nota (1–24 semitonos).
 - **Notas MIDI**: as notas que cantas saen como notas MIDI, para tocar un sintetizador coa voz.
 
+## Edición
+
+![A pestana Edición](img/edicion.png)
+
+Para levar nota a nota a onde queiras, coma en Melodyne, pero sen ARA: vale en calquera DAW (tamén en Ableton).
+
+1. **Captura.** Na pestana **Edición**, acende **Capturar** e dálle ao play no DAW coa pista da voz pasando por Barullo Tune. A voz aparece no rolo, sobre a liña de tempo do DAW, e pártese en notas: cada bloque é unha nota á altura á que vai, e a liña laranxa, o que cantaches. Apaga **Capturar** cando acabes (capturar outra vez un anaco substitúe o que había nel).
+2. **Edita.** Arrastra unha nota arriba ou abaixo e vai a outra nota; con **Alt**, móvese en cents. Dobre clic (ou retroceso, ou **Como estaba**) e volve a como estaba. Coas frechas: esquerda e dereita escollen nota, arriba e abaixo móvena (con Alt, 5 cents). As notas editadas vense en laranxa, cunha pantasma de onde estaban.
+3. **Escoita.** Ao volver tocar ese anaco, cada nota editada vai a onde a puxeches. Corríxese coa velocidade e a transición de **Corrección**, pero enteira: sen tolerancia, flexibilidade, humanizar nin cantidade. As notas sen editar corríxeas Barullo Tune en directo, coma sempre.
+
+- **Todas á escala**: cada nota, á nota da escala máis próxima e exacta (quedan editadas: xa non dependen de como cantes).
+- **Seguir o DAW**: a vista vai onde vai o DAW. Ao movela á man deixa de seguilo; dobre clic no baleiro, volve. Roda: moverse no tempo; Cmd/Ctrl + roda (ou − e +): achegar; maiúsculas + roda: arriba e abaixo.
+- **Borrar a captura** bórrao todo. Cada cambio pódese desfacer coas frechas da cabeceira.
+- A captura e as notas van co proxecto do DAW.
+
 ## Escala, notas e afinación
 
 Enriba dos mandos, á dereita, o modo e **Detectar**; na fila de enriba do teclado, a tonalidade, a voz e a afinación:

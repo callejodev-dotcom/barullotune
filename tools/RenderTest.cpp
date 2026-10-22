@@ -206,7 +206,7 @@ static void snapshot (const juce::File& png, int tab)
     setP (p, "harm1", 1); setP (p, "harm2", 1); setP (p, "flexibilidade", 20); setP (p, "vibgen_fondo", 18);
     std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
     auto* te = dynamic_cast<TuneEditor*> (ed.get());
-    te->showTab (tab == 4 ? 0 : tab);
+    te->showTab (tab >= 4 ? 0 : tab);
     if (tab == 4) te->showPractice (true);   // 4: o informe da práctica
     juce::AudioBuffer<float> buf (2, 512);
     const int stop = (int) (SR * 4.6);
@@ -217,6 +217,28 @@ static void snapshot (const juce::File& png, int tab)
         if ((pos / 512) % 3 == 0) te->tick();
     }
     te->tick();
+    if (tab == 5)
+    {
+        // 5: edición, cunha toma capturada (a voz da proba, sobre a liña de tempo) e dúas notas editadas
+        p.edicion.capturando = true;
+        for (int k = 0; k * Edicion::trama * SR < (double) truth.size(); ++k)
+        {
+            const double m = truth[(size_t) (k * Edicion::trama * SR)];
+            p.edicion.capturar (k * Edicion::trama + 0.4, m, m > 0);
+        }
+        p.edicion.capturando = false;
+        p.edicion.actualizar (p.notaPermitida());
+        int k = 0;
+        for (const auto& n : std::vector<Edicion::Nota> (p.edicion.notas))
+        {
+            if (k == 4) p.edicion.editar (n.id, n.destino + 2, 0.0, p.notaPermitida());
+            if (k == 8) p.edicion.editar (n.id, n.destino, 30.0, p.notaPermitida());
+            ++k;
+        }
+        p.edicion.posicion = 3.35;
+        te->demoEdicion();
+        for (int i = 0; i < 30; ++i) te->tick();
+    }
     // (BT_SCALE: a escala da captura; por defecto 1,5, coma unha pantalla retina)
     const float scale = std::getenv ("BT_SCALE") != nullptr ? (float) std::atof (std::getenv ("BT_SCALE")) : 1.5f;
     auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, scale);
@@ -313,7 +335,7 @@ int main (int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 3 && juce::String (argv[1]) == "--file") return processFile (argc, argv);
     if (argc > 1 && juce::String (argv[1]) == "--cpu") { cpuBench (20.0); return 0; }
-    // --snapshot captura.png [pestana 0–3]
+    // --snapshot captura.png [pestana 0–3; 4 o informe; 5 a edición]
     if (argc > 2 && juce::String (argv[1]) == "--snapshot") { snapshot (juce::File { juce::String (argv[2]) }, argc > 3 ? juce::String (argv[3]).getIntValue() : 0); return 0; }
     // BTRenderTest [saida.wav] [--json metricas.json]
     juce::String wavOut, jsonOut;
@@ -1714,8 +1736,27 @@ int main (int argc, char** argv)
             const auto& a = p.edicion.notas[k]; const auto& b = q.edicion.notas[k];
             estado = a.ini == b.ini && a.fin == b.fin && a.destino == b.destino && std::abs (a.cents - b.cents) < 1e-9 && a.editada == b.editada;
         }
+        // desfacer: un cambio de nota coma os da interface (no paso do desfacer do procesador)
+        bool desfai = false;
+        if (const auto* nota5 = p.edicion.buscar (idDe[4]))
+        {
+            const uint32_t id5 = nota5->id;
+            auto* pp = &p;
+            p.estado.novoPaso();
+            p.estado.cambio ("nota", [pp, id5] { ui::RoloNotas::aplicar (*pp, id5, 72, 10.0, true); }, [pp, id5] { ui::RoloNotas::aplicar (*pp, id5, 69, 0.0, true); });
+            p.estado.novoPaso();
+            double cx = 0;
+            const double tt = (p.edicion.buscar (id5)->ini + 3) * Edicion::trama;
+            const bool feito = p.edicion.forzada (tt, cx) == 72 && std::abs (cx - 10.0) < 1e-9;
+            p.undo.undo();
+            const bool desfeito = p.edicion.forzada (tt, cx) == 69 && std::abs (cx) < 1e-9 && p.edicion.buscar (id5)->destino == 69;
+            p.undo.redo();
+            const bool refeito = p.edicion.forzada (tt, cx) == 72;
+            p.undo.undo();
+            desfai = feito && desfeito && refeito;
+        }
         double c1 = 0, c2 = 0;
-        estado = estado && q.edicion.hayEditadas() && q.edicion.forzada ((p.edicion.buscar (idDe[8])->ini + 3) * Edicion::trama, c1) == 60
+        estado = estado && desfai && q.edicion.hayEditadas() && q.edicion.forzada ((p.edicion.buscar (idDe[8])->ini + 3) * Edicion::trama, c1) == 60
                  && p.edicion.forzada ((p.edicion.buscar (idDe[8])->ini + 3) * Edicion::trama, c2) == 60 && std::abs (c1 - 30.0) < 1e-9;
         std::printf ("edición (%s): %d de %zu notas atopadas, %zu en total; editadas: La %.2f (en directo %.2f), Do+30 %.2f (%.2f); sen editar: %.2f (%.2f); estado %s\n",
                      xeito == 0 ? "Directo" : "Estudio", atopadas, mel.size(), p.edicion.notas.size(), n5, n5a, n9, n9a, n2, n2a, estado ? "ben" : "MAL");

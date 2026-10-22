@@ -169,12 +169,14 @@ bool Edicion::actualizar (const Permitida& permitida)
         notas.push_back (n);
     }
     std::sort (notas.begin(), notas.end(), [] (const Nota& x, const Nota& y) { return x.ini < y.ini; });
+    ++revision;
     return true;
 }
 
 void Edicion::redestinar (const Permitida& permitida)
 {
     for (auto& n : notas) if (! n.editada) { n.destino = destinoPorDefecto (n.centro, permitida); n.cents = 0; }
+    ++revision;
 }
 
 void Edicion::editar (uint32_t id, int destino, double cents, const Permitida&)
@@ -187,6 +189,7 @@ void Edicion::editar (uint32_t id, int destino, double cents, const Permitida&)
             n.destino = std::max (0, std::min (127, destino));
             n.cents = std::max (-50.0, std::min (50.0, cents));
             escribirForzado (n);
+            ++revision;
             return;
         }
 }
@@ -200,6 +203,7 @@ void Edicion::restaurar (uint32_t id, const Permitida& permitida)
             n.editada = false;
             n.destino = destinoPorDefecto (n.centro, permitida);
             n.cents = 0;
+            ++revision;
             return;
         }
 }
@@ -213,6 +217,7 @@ void Edicion::borrar()
     for (int k = a; k <= b; ++k) capturado[(size_t) k].store (nada, std::memory_order_relaxed);
     primeira = maxTramas; ultima = -1;
     sucioIni = maxTramas; sucioFin = -1;
+    ++revision;
 }
 
 // ---- estado: o ton capturado (cents en int16, base64) e as notas
@@ -281,4 +286,5 @@ void Edicion::cargar (const juce::ValueTree& t, const Permitida& permitida)
     std::sort (notas.begin(), notas.end(), [] (const Nota& x, const Nota& y) { return x.ini < y.ini; });
     for (const auto& n : notas) if (n.editada) { escribirForzado (n); numEditadas.fetch_add (1); }
     seguinteId = maxId + 1;
+    ++revision;
 }

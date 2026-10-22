@@ -54,6 +54,7 @@ public:
         bool editada = false;
     };
     std::vector<Nota> notas;         // ordenadas por ini
+    std::atomic<uint32_t> revision { 0 };   // sobe con cada cambio das notas (para repintar)
 
     // parte en notas o que se capturou de novo; «permitida» di as notas da escala (para o
     // destino por defecto). Devolve se cambiou algo

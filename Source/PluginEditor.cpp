@@ -659,6 +659,413 @@ void PracticePanel::paint (juce::Graphics& g)
     paintGlassShine (g, r, 14.0f);
 }
 
+// ================================================================ edición: o rolo das notas
+RoloNotas::RoloNotas (TuneProcessor& p) : proc (p)
+{
+    setWantsKeyboardFocus (true);
+    setTitle (U ("Notas capturadas"));
+}
+
+RoloNotas::Vista RoloNotas::vista() const
+{
+    auto r = getLocalBounds().toFloat().reduced (14.0f, 12.0f);
+    r.removeFromLeft (40.0f);      // os nomes das notas
+    r.removeFromBottom (16.0f);    // os segundos
+    r.removeFromTop (14.0f);       // o letreiro
+    return { r, t0, segundos, centroM - altoM * 0.5, centroM + altoM * 0.5 };
+}
+
+float RoloNotas::xDe (const Vista& v, double t) const { return v.area.getX() + (float) ((t - v.t0) / v.seg) * v.area.getWidth(); }
+double RoloNotas::tDe (const Vista& v, float x) const { return v.t0 + (double) (x - v.area.getX()) / v.area.getWidth() * v.seg; }
+float RoloNotas::yDe (const Vista& v, double m) const { return v.area.getBottom() - (float) ((m - v.mLo) / (v.mHi - v.mLo)) * v.area.getHeight(); }
+
+void RoloNotas::aplicar (TuneProcessor& p, uint32_t id, int destino, double cents, bool editada)
+{
+    if (editada) p.edicion.editar (id, destino, cents, p.notaPermitida());
+    else p.edicion.restaurar (id, p.notaPermitida());
+}
+
+// un cambio dunha nota, que se pode desfacer (o desfacer garda o procesador, non a xanela)
+void RoloNotas::editarCon (uint32_t id, int d, double c, bool e, int d0, double c0, bool e0)
+{
+    auto* p = &proc;
+    proc.estado.cambio (U ("nota"), [p, id, d, c, e] { aplicar (*p, id, d, c, e); }, [p, id, d0, c0, e0] { aplicar (*p, id, d0, c0, e0); });
+}
+
+void RoloNotas::tick()
+{
+    auto& ed = proc.edicion;
+    bool pintar = ed.actualizar (proc.notaPermitida());
+    // a escala cambiou: as notas sen editar van á nota da escala de agora
+    const auto mascara = (uint16_t) (proc.effectiveMask() | proc.freeMask());
+    if (mascara != ultimaMascara) { ultimaMascara = mascara; ed.redestinar (proc.notaPermitida()); }
+    const double pos = ed.posicion.load();
+    if (seguir && pos >= 0.0 && (pos < t0 || pos > t0 + segundos * 0.85)) t0 = std::max (0.0, pos - segundos * 0.15);
+    // de arriba abaixo: centrado nas notas que se ven (se non se moveu á man)
+    if (! vManual)
+    {
+        double lo = 1e9, hi = -1e9;
+        for (const auto& n : ed.notas)
+            if (n.fin * Edicion::trama > t0 && n.ini * Edicion::trama < t0 + segundos)
+            {
+                const double a = n.destino + n.cents * 0.01;
+                lo = std::min ({ lo, a, n.centro }); hi = std::max ({ hi, a, n.centro });
+            }
+        if (lo > hi)
+        {
+            double m = 0;
+            const int k0 = (int) (t0 / Edicion::trama), k1 = (int) ((t0 + segundos) / Edicion::trama);
+            for (int k = k0; k <= k1; k += 4) if (ed.ton (k, m)) { lo = std::min (lo, m); hi = std::max (hi, m); }
+        }
+        if (lo <= hi)
+        {
+            // centrado e co alto xusto para que se vexa todo (entre 12 e 36 semitonos)
+            const double obxectivo = 0.5 * (lo + hi), alto = juce::jlimit (12.0, 36.0, hi - lo + 4.0);
+            if (std::abs (obxectivo - centroM) > 0.02 || std::abs (alto - altoM) > 0.02)
+            {
+                // (un salto grande, de golpe; os pequenos, amodo)
+                const double k = std::abs (obxectivo - centroM) > 6.0 || std::abs (alto - altoM) > 8.0 ? 1.0 : 0.25;
+                centroM += (obxectivo - centroM) * k; altoM += (alto - altoM) * k;
+                pintar = true;
+            }
+        }
+    }
+    const auto rev = ed.revision.load();
+    if (rev != ultimaRevision) { ultimaRevision = rev; pintar = true; if (onSeleccion) onSeleccion(); }
+    if (pintar || ! juce::exactlyEqual (pos, ultimaPos) || ed.capturando.load()) { ultimaPos = pos; repaint(); }
+}
+
+void RoloNotas::paint (juce::Graphics& g)
+{
+    const auto todo = getLocalBounds().toFloat();
+    paintGlass (g, todo, 14.0f);
+    const auto v = vista();
+    auto& ed = proc.edicion;
+    const auto permitida = proc.notaPermitida();
+    const float carril = v.area.getHeight() / (float) (v.mHi - v.mLo);
+
+    // o letreiro: que é isto e se está capturando
+    {
+        auto top = juce::Rectangle<float> (v.area.getX(), todo.getY() + 10.0f, v.area.getWidth(), 14.0f);
+        g.setColour (col::crema3);
+        drawCaps (g, U ("Edición · as notas capturadas"), top, juce::Justification::centredLeft, 8.0f, 0.22f);
+        if (ed.capturando.load())
+        {
+            const float cx = top.getRight() - 112.0f, cy = top.getCentreY();
+            g.setColour (col::laranxa.withAlpha (0.3f)); g.fillEllipse (cx - 6, cy - 6, 12, 12);
+            g.setColour (col::laranxa); g.fillEllipse (cx - 3.5f, cy - 3.5f, 7, 7);
+            drawCaps (g, U ("Capturando"), top, juce::Justification::centredRight, 8.0f, 0.22f);
+        }
+    }
+
+    // os carrís (as notas da escala, máis claras) e os seus nomes
+    g.saveState();
+    g.reduceClipRegion (v.area.expanded (0.0f, 2.0f).toNearestInt());
+    for (int k = (int) std::floor (v.mLo) - 1; k <= (int) std::ceil (v.mHi) + 1; ++k)
+    {
+        const float y = yDe (v, k);
+        if (permitida (k)) { g.setColour (col::crema.withAlpha (0.035f)); g.fillRect (v.area.getX(), y - carril * 0.5f, v.area.getWidth(), carril); }
+        g.setColour (col::crema.withAlpha (permitida (k) ? 0.09f : 0.035f));
+        for (float x = v.area.getX(); x < v.area.getRight(); x += 6.0f) g.fillRect (x, y - 0.5f, 2.0f, 1.0f);
+    }
+    // o tempo: unha liña cada segundo (ou cada 5 / 10 se se ve moito)
+    const double paso = v.seg > 40 ? 10.0 : v.seg > 16 ? 5.0 : v.seg > 6 ? 1.0 : 0.5;
+    for (double t = std::ceil (v.t0 / paso) * paso; t <= v.t0 + v.seg; t += paso)
+    {
+        const float x = xDe (v, t);
+        g.setColour (col::crema.withAlpha (std::fmod (t, paso * 2) < 1e-6 ? 0.07f : 0.04f));
+        g.fillRect (x - 0.5f, v.area.getY(), 1.0f, v.area.getHeight());
+    }
+    g.restoreState();
+    // (de arriba abaixo, saltando as que non collen: cando se ve moito, unha de cada pouco)
+    float ultimoNome = -1e9f;
+    for (int k = (int) std::floor (v.mHi); k >= (int) std::ceil (v.mLo); --k)
+        if ((permitida (k) || ((k % 12) + 12) % 12 == 0) && yDe (v, k) - ultimoNome >= 12.0f)
+        {
+            ultimoNome = yDe (v, k);
+            g.setColour (permitida (k) ? col::crema3 : col::crema3.withAlpha (0.5f));
+            drawCaps (g, scales::noteWithOctave (k), juce::Rectangle<float> (todo.getX() + 6.0f, ultimoNome - 7.0f, 40.0f, 14.0f), juce::Justification::centredRight, 8.0f, 0.1f);
+        }
+    for (double t = std::ceil (v.t0 / paso) * paso; t <= v.t0 + v.seg; t += paso)
+    {
+        const int s = (int) std::floor (t + 1e-6);
+        const auto txt = paso < 1.0 && std::fmod (t, 1.0) > 0.25 ? juce::String() : juce::String (s / 60) + ":" + juce::String (s % 60).paddedLeft ('0', 2);
+        g.setColour (col::crema3);
+        drawCaps (g, txt, juce::Rectangle<float> (xDe (v, t) - 30.0f, v.area.getBottom() + 3.0f, 60.0f, 12.0f), juce::Justification::centred, 7.5f, 0.1f);
+    }
+
+    g.saveState();
+    g.reduceClipRegion (v.area.expanded (0.0f, 2.0f).toNearestInt());
+    // o ton cantado: a liña laranxa (unha mostra por píxel, como moito)
+    {
+        juce::Path p; bool pen = false; double m = 0;
+        const int k0 = std::max (0, (int) std::floor (v.t0 / Edicion::trama) - 1), k1 = (int) std::ceil ((v.t0 + v.seg) / Edicion::trama) + 1;
+        const int salto = std::max (1, (int) ((double) (k1 - k0) / std::max (1.0, (double) v.area.getWidth())));
+        for (int k = k0; k <= k1; k += salto)
+        {
+            if (! ed.ton (k, m)) { pen = false; continue; }
+            const float x = xDe (v, (k + 0.5) * Edicion::trama), y = yDe (v, m);
+            if (! pen) { p.startNewSubPath (x, y); pen = true; } else p.lineTo (x, y);
+        }
+        g.setColour (col::laranxa.withAlpha (0.18f)); g.strokePath (p, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (col::laranxa.withAlpha (0.85f)); g.strokePath (p, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+    // as notas: un bloque á altura á que van; as editadas, en laranxa e coa pantasma de onde estaban
+    for (const auto& n : ed.notas)
+    {
+        const float x1 = xDe (v, n.ini * Edicion::trama), x2 = xDe (v, n.fin * Edicion::trama);
+        if (x2 < v.area.getX() || x1 > v.area.getRight()) continue;
+        const double alvo = n.destino + n.cents * 0.01;
+        const float y = yDe (v, alvo), alto = std::max (6.0f, carril * 0.72f);
+        const auto rr = juce::Rectangle<float> (x1 + 0.5f, y - alto * 0.5f, std::max (3.0f, x2 - x1 - 1.0f), alto);
+        const bool sel = n.id == seleccionada, sobre = n.id == hover;
+        if (n.editada && std::abs (alvo - n.centro) > 0.15)
+        {
+            const float yc = yDe (v, n.centro);
+            const auto pantasma = rr.withY (yc - alto * 0.5f);
+            juce::Path pp; pp.addRoundedRectangle (pantasma, 4.0f);
+            const float dash[] = { 3.0f, 3.0f };
+            juce::Path dd; juce::PathStrokeType (1.0f).createDashedStroke (dd, pp, dash, 2);
+            g.setColour (col::crema.withAlpha (0.28f)); g.fillPath (dd);
+            g.setColour (col::laranxa.withAlpha (0.35f));
+            g.drawArrow ({ pantasma.getX() + 8.0f, yc, pantasma.getX() + 8.0f, y + (yc > y ? alto * 0.5f : -alto * 0.5f) }, 1.2f, 5.0f, 5.0f);
+        }
+        const auto tinta = n.editada ? col::laranxa : col::crema;
+        if (sel) { g.setColour (tinta.withAlpha (0.18f)); g.fillRoundedRectangle (rr.expanded (3.0f), 6.0f); }
+        g.setGradientFill (juce::ColourGradient (tinta.withAlpha (n.editada ? 0.42f : 0.16f), 0.0f, rr.getY(), tinta.withAlpha (n.editada ? 0.26f : 0.07f), 0.0f, rr.getBottom(), false));
+        g.fillRoundedRectangle (rr, 4.0f);
+        g.setColour (tinta.withAlpha (sel || sobre ? 1.0f : (n.editada ? 0.85f : 0.45f)));
+        g.drawRoundedRectangle (rr, 4.0f, sel ? 1.8f : 1.0f);
+        if (rr.getWidth() > 44.0f)
+        {
+            const int c = (int) std::lround (n.cents);
+            g.setColour (n.editada ? col::crema : col::crema2);
+            drawCaps (g, scales::noteWithOctave (n.destino) + (c != 0 ? (c > 0 ? " +" : U (" −")) + juce::String (std::abs (c)) : juce::String()),
+                      rr.reduced (6.0f, 0.0f).withHeight (std::max (rr.getHeight(), 12.0f)).withCentre (rr.getCentre()), juce::Justification::centredLeft, 7.5f, 0.08f);
+        }
+    }
+    // onde vai o DAW
+    const double pos = ed.posicion.load();
+    if (pos >= v.t0 && pos <= v.t0 + v.seg)
+    {
+        const float x = xDe (v, pos);
+        g.setColour (col::crema.withAlpha (0.25f)); g.fillRect (x - 2.0f, v.area.getY(), 4.0f, v.area.getHeight());
+        g.setColour (col::crema); g.fillRect (x - 0.75f, v.area.getY(), 1.5f, v.area.getHeight());
+    }
+    g.restoreState();
+
+    if (ed.baleira())
+    {
+        g.setColour (col::crema2);
+        g.setFont (body (15.0f));
+        g.drawFittedText (ed.capturando.load() ? U ("Capturando: dálle ao play no DAW e canta (ou pon a toma). A voz aparece aquí, partida en notas.")
+                                               : U ("Acende «Capturar» e dálle ao play no DAW: a voz aparece aquí, partida en notas. Despois arrastra cada nota a onde queiras."),
+                          v.area.reduced (40.0f, 0.0f).toNearestInt(), juce::Justification::centred, 3);
+    }
+    if (hasKeyboardFocus (false)) { g.setColour (col::laranxa.withAlpha (0.6f)); g.drawRoundedRectangle (todo.reduced (1.5f), 13.0f, 1.2f); }
+    paintGlassShine (g, todo, 14.0f);
+}
+
+const Edicion::Nota* RoloNotas::notaEn (juce::Point<float> p) const
+{
+    const auto v = vista();
+    const float carril = v.area.getHeight() / (float) (v.mHi - v.mLo), media = std::max (5.0f, carril * 0.36f) + 2.0f;
+    for (const auto& n : proc.edicion.notas)
+    {
+        const float x1 = xDe (v, n.ini * Edicion::trama), x2 = xDe (v, n.fin * Edicion::trama);
+        if (p.x >= x1 && p.x <= x2 && std::abs (p.y - yDe (v, n.destino + n.cents * 0.01)) <= media) return &n;
+    }
+    return nullptr;
+}
+
+void RoloNotas::mouseMove (const juce::MouseEvent& e)
+{
+    const auto* n = notaEn (e.position);
+    const uint32_t h = n != nullptr ? n->id : 0;
+    if (h != hover) { hover = h; repaint(); }
+    setMouseCursor (n != nullptr ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
+}
+
+void RoloNotas::mouseDown (const juce::MouseEvent& e)
+{
+    grabKeyboardFocus();
+    if (const auto* n = notaEn (e.position))
+    {
+        seleccionada = arrastrando = n->id;
+        destino0 = n->destino; cents0 = n->cents; editada0 = n->editada;
+        yInicio = e.position.y;
+    }
+    else
+    {
+        seleccionada = arrastrando = 0;
+        movendoVista = true; t0Inicio = t0;
+    }
+    if (onSeleccion) onSeleccion();
+    repaint();
+}
+
+void RoloNotas::mouseDrag (const juce::MouseEvent& e)
+{
+    const auto v = vista();
+    if (arrastrando != 0)
+    {
+        const auto* n = proc.edicion.buscar (arrastrando);
+        if (n == nullptr) return;
+        const double carril = v.area.getHeight() / (v.mHi - v.mLo);
+        const double delta = (yInicio - e.position.y) / carril;
+        int d; double c;
+        if (e.mods.isAltDown())
+        {
+            // con Alt, cents: a nota máis próxima e o que sobra
+            const double total = destino0 + cents0 * 0.01 + delta;
+            d = (int) std::lround (total); c = juce::jlimit (-50.0, 50.0, (total - d) * 100.0);
+        }
+        else { d = destino0 + (int) std::lround (delta); c = cents0; }
+        d = juce::jlimit (0, 127, d);
+        if (d != n->destino || std::abs (c - n->cents) > 0.4 || ! n->editada) aplicar (proc, arrastrando, d, c, true);
+        repaint();
+    }
+    else if (movendoVista && std::abs (e.getDistanceFromDragStartX()) > 2)
+    {
+        seguir = false;
+        t0 = std::max (0.0, t0Inicio - e.getDistanceFromDragStartX() / (double) v.area.getWidth() * v.seg);
+        if (onSeleccion) onSeleccion();
+        repaint();
+    }
+}
+
+void RoloNotas::mouseUp (const juce::MouseEvent&)
+{
+    if (arrastrando != 0)
+        if (const auto* n = proc.edicion.buscar (arrastrando))
+            if (n->destino != destino0 || std::abs (n->cents - cents0) > 1e-9 || n->editada != editada0)
+                editarCon (n->id, n->destino, n->cents, n->editada, destino0, cents0, editada0);
+    arrastrando = 0;
+    movendoVista = false;
+}
+
+void RoloNotas::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (const auto* n = notaEn (e.position))
+    {
+        seleccionada = n->id;
+        restaurarSeleccionada();
+    }
+    else { vManual = false; seguir = true; if (onSeleccion) onSeleccion(); }   // no baleiro: a vista, outra vez co DAW
+}
+
+void RoloNotas::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    const auto v = vista();
+    if (e.mods.isCommandDown() || e.mods.isCtrlDown())
+    {
+        // zoom arredor do rato
+        const double t = tDe (v, e.position.x);
+        const double f = w.deltaY > 0 ? 1.0 / 1.2 : 1.2;
+        segundos = juce::jlimit (1.0, 120.0, segundos * f);
+        t0 = std::max (0.0, t - (t - t0) * f);
+    }
+    else if (e.mods.isShiftDown()) { centroM = juce::jlimit (20.0, 110.0, centroM + w.deltaY * 6.0); vManual = true; }
+    else
+    {
+        const double d = std::abs (w.deltaX) > std::abs (w.deltaY) ? w.deltaX : w.deltaY;
+        t0 = std::max (0.0, t0 - d * segundos * 0.5);
+        seguir = false;
+    }
+    if (onSeleccion) onSeleccion();
+    repaint();
+}
+
+bool RoloNotas::keyPressed (const juce::KeyPress& k)
+{
+    auto& ed = proc.edicion;
+    const int code = k.getKeyCode();
+    if (code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey)
+    {
+        // a nota de antes ou a seguinte
+        int i = -1;
+        for (int j = 0; j < (int) ed.notas.size(); ++j) if (ed.notas[(size_t) j].id == seleccionada) i = j;
+        i = juce::jlimit (0, (int) ed.notas.size() - 1, i < 0 ? 0 : i + (code == juce::KeyPress::rightKey ? 1 : -1));
+        if (ed.notas.empty()) return true;
+        const auto& n = ed.notas[(size_t) i];
+        seleccionada = n.id;
+        if (n.ini * Edicion::trama < t0 || n.fin * Edicion::trama > t0 + segundos) { t0 = std::max (0.0, n.ini * Edicion::trama - segundos * 0.2); seguir = false; }
+    }
+    else if ((code == juce::KeyPress::upKey || code == juce::KeyPress::downKey) && seleccionada != 0)
+    {
+        const auto* n = ed.buscar (seleccionada);
+        if (n == nullptr) return true;
+        const int dir = code == juce::KeyPress::upKey ? 1 : -1;
+        int d = n->destino; double c = n->cents;
+        if (k.getModifiers().isAltDown())
+        {
+            c += dir * 5.0;
+            if (c > 50.0) { c -= 100.0; ++d; } else if (c < -50.0) { c += 100.0; --d; }
+        }
+        else d += dir;
+        editarCon (n->id, juce::jlimit (0, 127, d), c, true, n->destino, n->cents, n->editada);
+    }
+    else if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey) restaurarSeleccionada();
+    else return false;
+    if (onSeleccion) onSeleccion();
+    repaint();
+    return true;
+}
+
+juce::String RoloNotas::getTooltip()
+{
+    if (const auto* n = proc.edicion.buscar (hover))
+    {
+        const int cc = juce::roundToInt ((n->centro - std::round (n->centro)) * 100.0);
+        return scales::noteWithOctave (n->destino) + U (" (cantada: ") + scales::noteWithOctave ((int) std::lround (n->centro))
+             + (cc != 0 ? (cc > 0 ? " +" : U (" −")) + juce::String (std::abs (cc)) + " c" : juce::String()) + U ("). ")
+             + U ("Arrastra arriba ou abaixo para levala a outra nota (con Alt, en cents); dobre clic ou retroceso, como estaba.");
+    }
+    return U ("As notas que capturaches, na liña de tempo do DAW. Roda: moverse no tempo; Cmd/Ctrl + roda: achegar; maiúsculas + roda: arriba e abaixo; "
+              "arrastrar no baleiro: moverse; dobre clic no baleiro: volver a seguir o DAW. Frechas: escoller nota e subila ou baixala (con Alt, 5 cents).");
+}
+
+void RoloNotas::restaurarSeleccionada()
+{
+    if (const auto* n = proc.edicion.buscar (seleccionada))
+        if (n->editada) editarCon (n->id, n->destino, n->cents, false, n->destino, n->cents, true);
+}
+
+void RoloNotas::todasAEscala()
+{
+    // todas as notas á nota da escala máis próxima (editadas: así quedan fixas), nun paso
+    struct Antes { uint32_t id; int d; double c; bool e; };
+    std::vector<Antes> antes;
+    for (const auto& n : proc.edicion.notas) antes.push_back ({ n.id, n.destino, n.cents, n.editada });
+    if (antes.empty()) return;
+    auto* p = &proc;
+    proc.estado.cambio (U ("notas á escala"),
+        [p, antes]
+        {
+            for (const auto& a : antes)
+                if (const auto* n = p->edicion.buscar (a.id))
+                    aplicar (*p, a.id, Edicion::destinoPorDefecto (n->centro, p->notaPermitida()), 0.0, true);
+        },
+        [p, antes] { for (const auto& a : antes) aplicar (*p, a.id, a.d, a.c, a.e); });
+}
+
+void RoloNotas::borrarCaptura()
+{
+    if (proc.edicion.baleira()) return;
+    const auto gardado = proc.edicion.gardar();
+    auto* p = &proc;
+    proc.estado.cambio (U ("borrar a captura"), [p] { p->edicion.borrar(); }, [p, gardado] { p->edicion.cargar (gardado, p->notaPermitida()); });
+    seleccionada = 0;
+}
+
+void RoloNotas::zoom (double factor)
+{
+    const double medio = t0 + segundos * 0.5;
+    segundos = juce::jlimit (1.0, 120.0, segundos * factor);
+    t0 = std::max (0.0, medio - segundos * 0.5);
+    repaint();
+}
+
 // ================================================================ teclado
 // cinco oitavas de teclas de verdade: a cor de cada tecla di o estado da nota (crema na
 // escala, gris fóra, raias laranxa libre, laranxa a que cantas)
@@ -902,6 +1309,8 @@ void Knob::paint (juce::Graphics& g)
 // ================================================================ editor
 namespace lay
 {
+    // edición: a información da nota escollida (no panel dos mandos)
+    constexpr int edInfoX = 36, edInfoY = 452, edInfoW = 972, edInfoH = 94;
     // cabeceira
     constexpr int topY = 14, topH = 52, btnY = 23, btnH = 34;
     // pantalla
@@ -1060,11 +1469,12 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     setupSegment (calBtn, 3, "calidade", cals, calTips);
 
     // ---- pestanas
-    const char* tabs[numTabs] = { "Corrección", "Voz", "Armonías", "Saída" };
+    const char* tabs[numTabs] = { "Corrección", "Voz", "Armonías", "Saída", "Edición" };
     const char* tabTips[numTabs] = { "Como se afina: velocidade, transición, tolerancia, flexibilidade, humanizar.",
                                      "O timbre (formantes, transpor, aire) e o vibrato xerado.",
                                      "Ata catro voces novas a partir da túa.",
-                                     "La de referencia, mestura, volume e MIDI." };
+                                     "La de referencia, mestura, volume e MIDI.",
+                                     "Captura a voz sobre a liña de tempo do DAW e edita as notas á man, unha a unha (sen ARA: vale en calquera DAW)." };
     for (int i = 0; i < numTabs; ++i)
     {
         tabBtn[i].setButtonText (U (tabs[i]));
@@ -1167,6 +1577,34 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     midiOut.setTooltip (U ("As notas que cantas saen como notas MIDI, para tocar un sintetizador coa voz."));
     buttonAtts.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.params, "midi_saida", midiOut));
     canvas.addAndMakeVisible (midiOut);
+
+    // ---- edición
+    canvas.addChildComponent (rolo);
+    rolo.onSeleccion = [this] { canvas.repaint (lay::edInfoX, lay::edInfoY, lay::edInfoW, lay::edInfoH); refresh(); };
+    edCapturar.setButtonText (U ("Capturar"));
+    edCapturar.setTooltip (U ("Mentres está aceso e o DAW toca, a voz que entra gárdase sobre a liña de tempo e pártese en notas. "
+                              "Volver capturar un anaco substitúe o que había nel."));
+    edCapturar.onClick = [this] { proc.edicion.capturando = ! proc.edicion.capturando.load(); rolo.repaint(); refresh(); };
+    edSeguir.setButtonText (U ("Seguir o DAW"));
+    edSeguir.setTooltip (U ("A vista vai onde vai o DAW. Ao mover a vista á man, deixa de seguilo; dobre clic no baleiro, volve."));
+    edSeguir.onClick = [this] { rolo.seguir = ! rolo.seguir; rolo.repaint(); refresh(); };
+    edEscala.setButtonText (U ("Todas á escala"));
+    edEscala.setTooltip (U ("Todas as notas á nota da escala máis próxima, exactas (quedan editadas: xa non dependen de como se cante)."));
+    edEscala.onClick = [this] { rolo.todasAEscala(); };
+    edRestaurar.setButtonText (U ("Como estaba"));
+    edRestaurar.setTooltip (U ("A nota escollida volve a como estaba: sen editar, a corrixe Barullo Tune en directo, coma sempre."));
+    edRestaurar.onClick = [this] { rolo.restaurarSeleccionada(); };
+    edBorrar.setButtonText (U ("Borrar a captura"));
+    edBorrar.setTooltip (U ("Borra todo o capturado e as notas editadas (pódese desfacer)."));
+    edBorrar.onClick = [this] { rolo.borrarCaptura(); };
+    edZoomMenos.setButtonText (U ("−"));
+    edZoomMenos.setTooltip (U ("Ver máis tempo (tamén Cmd/Ctrl + roda no rolo)."));
+    edZoomMenos.onClick = [this] { rolo.zoom (1.5); };
+    edZoomMais.setButtonText ("+");
+    edZoomMais.setTooltip (U ("Ver menos tempo, máis de preto."));
+    edZoomMais.onClick = [this] { rolo.zoom (1.0 / 1.5); };
+    for (auto* b : { &edEscala, &edRestaurar, &edBorrar, &edZoomMenos, &edZoomMais }) b->getProperties().set ("noLed", true);
+    for (auto* b : { &edCapturar, &edSeguir, &edEscala, &edRestaurar, &edBorrar, &edZoomMenos, &edZoomMais }) canvas.addChildComponent (*b);
 
     // ---- modo, tonalidade, voz e afinación
     for (int i = 0; i < 12; ++i) tonica.addItem (scales::noteName (i), i + 1);
@@ -1276,6 +1714,14 @@ bool TuneEditor::typeValue (const juce::String& paramId, const juce::String& tex
     return false;
 }
 
+void TuneEditor::demoEdicion()
+{
+    showTab (TabEdit);
+    for (const auto& n : proc.edicion.notas) if (n.editada) { rolo.seleccionada = n.id; break; }
+    rolo.tick();
+    refresh();
+}
+
 void TuneEditor::showTab (int t)
 {
     tab = juce::jlimit (0, (int) numTabs - 1, t);
@@ -1293,6 +1739,14 @@ void TuneEditor::showTab (int t)
     }
     for (auto* k : { &la, &mest, &vol, &bend }) k->setVisible (o);
     midiOut.setVisible (o);
+    // edición: o rolo vai onde a pantalla
+    const bool e = tab == TabEdit;
+    display.setVisible (! e);
+    rolo.setVisible (e);
+    if (e && practicePanel.isVisible()) practicePanel.setVisible (false);
+    practiceBtn.setVisible (! e && ! practicePanel.isVisible());
+    for (auto* b : { &edCapturar, &edSeguir, &edEscala, &edRestaurar, &edBorrar, &edZoomMenos, &edZoomMais }) b->setVisible (e);
+    if (e) rolo.tick();
     for (int i = 0; i < numTabs; ++i) tabBtn[i].setToggleState (i == tab, juce::dontSendNotification);
     canvas.repaint();
 }
@@ -1418,6 +1872,13 @@ void TuneEditor::refresh()
         detect.setToggleState (false, juce::dontSendNotification);
     }
     detect.repaint();
+    // edición
+    const auto* nota = proc.edicion.buscar (rolo.seleccionada);
+    edCapturar.setToggleState (proc.edicion.capturando.load(), juce::dontSendNotification);
+    edSeguir.setToggleState (rolo.seguir, juce::dontSendNotification);
+    edEscala.setEnabled (! proc.edicion.notas.empty());
+    edRestaurar.setEnabled (nota != nullptr && nota->editada);
+    edBorrar.setEnabled (! proc.edicion.baleira());
 }
 
 void TuneEditor::timerCallback()
@@ -1425,6 +1886,7 @@ void TuneEditor::timerCallback()
     proc.finishKeyIfReady();
     display.update();
     keyboard.repaint();
+    if (rolo.isVisible()) rolo.tick();
     if (practicePanel.isVisible()) practicePanel.update();
     refresh();
     // a lista dos presets propios cambia se alguén garda ou borra ficheiros
@@ -1494,6 +1956,55 @@ void TuneEditor::paintCanvas (juce::Graphics& g)
         drawCaps (g, gr.second, r.withHeight (14.0f), juce::Justification::centred, 8.5f, 0.28f);
         g.setColour (col::laranxa.withAlpha (0.25f));
         g.fillRect (r.getX() + 10.0f, r.getY() + 17.0f, r.getWidth() - 20.0f, 1.0f);
+    }
+    if (tab == TabEdit)
+    {
+        // a nota escollida e como se edita
+        const auto r = juce::Rectangle<float> ((float) edInfoX, (float) edInfoY, (float) edInfoW, (float) edInfoH);
+        paintWell (g, r, 10.0f);
+        auto esq = r.reduced (18.0f, 12.0f).removeFromLeft (330.0f);
+        if (const auto* n = proc.edicion.buscar (rolo.seleccionada))
+        {
+            const int c = (int) std::lround (n->cents);
+            const auto nome = maiusculas (scales::noteName (n->destino)), oit = juce::String (n->destino / 12 - 2);
+            const auto f = cond (30.0f);
+            const float wn = juce::GlyphArrangement::getStringWidth (f, nome);
+            g.setColour (n->editada ? col::laranxa : col::crema);
+            g.setFont (f);
+            g.drawText (nome, esq.withHeight (36.0f), juce::Justification::centredLeft, false);
+            g.setFont (semi (14.0f));
+            g.drawText (oit, esq.withHeight (24.0f).withTrimmedLeft (wn + 3.0f), juce::Justification::centredLeft, false);
+            if (c != 0)
+            {
+                g.setColour (col::ouro);
+                drawCaps (g, (c > 0 ? "+" : U ("−")) + juce::String (std::abs (c)) + " c", esq.withHeight (36.0f).withTrimmedLeft (wn + 26.0f), juce::Justification::centredLeft, 13.0f, 0.1f);
+            }
+            const int cc = juce::roundToInt ((n->centro - std::round (n->centro)) * 100.0);
+            const auto cantada = scales::noteWithOctave ((int) std::lround (n->centro)) + (cc != 0 ? (cc > 0 ? " +" : U (" −")) + juce::String (std::abs (cc)) + " c" : juce::String());
+            auto tempo = [] (double s) { const int ms = juce::roundToInt (s * 10.0); return juce::String (ms / 600) + ":" + juce::String ((ms / 10) % 60).paddedLeft ('0', 2) + "," + juce::String (ms % 10); };
+            g.setColour (col::crema2);
+            drawCaps (g, U ("Cantada: ") + cantada + U ("  ·  ") + tempo (n->ini * Edicion::trama) + U ("–") + tempo (n->fin * Edicion::trama),
+                      esq.withTop (esq.getY() + 40.0f).withHeight (14.0f), juce::Justification::centredLeft, 8.0f, 0.18f);
+            g.setColour (n->editada ? col::laranxa : col::crema3);
+            drawCaps (g, n->editada ? U ("Editada: vai sempre aquí") : U ("Sen editar: corríxea o directo"),
+                      esq.withTop (esq.getY() + 58.0f).withHeight (14.0f), juce::Justification::centredLeft, 8.0f, 0.18f);
+        }
+        else
+        {
+            g.setColour (col::crema3);
+            drawCaps (g, proc.edicion.notas.empty() ? U ("Aínda non hai notas") : U ("Escolle unha nota no rolo"), esq.withHeight (36.0f), juce::Justification::centredLeft, 12.0f, 0.2f);
+        }
+        auto der = r.reduced (18.0f, 12.0f).withTrimmedLeft (350.0f);
+        g.setColour (col::lina);
+        g.fillRect (der.getX() - 12.0f, der.getY(), 1.0f, der.getHeight());
+        juce::AttributedString a;
+        a.setJustification (juce::Justification::topLeft);
+        a.setLineSpacing (3.0f);
+        a.append (U ("Arrastra unha nota arriba ou abaixo e vai a outra nota (con Alt, en cents); dobre clic, como estaba. "
+                     "Frechas: escoller nota e movela. Só van onde as puxeches as editadas (en laranxa): as outras corríxeas Barullo Tune en directo, coma sempre.\n"
+                     "Para escoitalo, o DAW ten que tocar ese anaco coa voz pasando por Barullo Tune."), body (13.0f), col::crema2);
+        juce::TextLayout tl; tl.createLayout (a, der.getWidth());
+        tl.draw (g, der);
     }
     if (tab == TabHarmony)
     {
@@ -1640,5 +2151,18 @@ void TuneEditor::layout()
     afin.setBounds (456, selY, 176, selH);
     scl.setBounds (638, selY, 56, selH);
     keyboard.setBounds (16, kbY, W - 32, kbH);
+
+    // edición: o rolo onde a pantalla; os botóns no panel dos mandos
+    rolo.setBounds (16, dispY, W - 32, dispH);
+    edCapturar.setBounds (36, knobY, 150, 34);
+    edSeguir.setBounds (194, knobY, 150, 34);
+    edEscala.setBounds (368, knobY, 150, 34);
+    edRestaurar.setBounds (526, knobY, 150, 34);
+    edBorrar.setBounds (684, knobY, 150, 34);
+    edZoomMenos.setBounds (912, knobY, 46, 34);
+    edZoomMais.setBounds (962, knobY, 46, 34);
+    groups[TabEdit].push_back ({ { 36, grpY, 308, 20 }, U ("Captura") });
+    groups[TabEdit].push_back ({ { 368, grpY, 466, 20 }, U ("Notas") });
+    groups[TabEdit].push_back ({ { 912, grpY, 96, 20 }, U ("Zoom") });
     updateBtn.setBounds (W / 2 - 200, footY - 4, 400, 22);
 }

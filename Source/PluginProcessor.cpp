@@ -165,7 +165,6 @@ TuneProcessor::TuneProcessor()
 {
     pModo = params.getRawParameterValue ("modo");
     pCapturar = params.getRawParameterValue ("edicion_capturar");
-    reloxoEdicion.startTimerHz (10);
     pTonica = params.getRawParameterValue ("tonica");
     pEscala = params.getRawParameterValue ("escala");
     pVel = params.getRawParameterValue ("velocidade");
@@ -961,12 +960,10 @@ void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
     params.state.setProperty ("ui", uiScale.load(), nullptr);
     params.state.setProperty ("tab", uiTab.load(), nullptr);
     auto st = params.copyState();
-    juce::ValueTree ed;   // o ton capturado e as notas editadas (ou os que aínda están por cargar)
-    {
-        const juce::ScopedLock sl (edicionPendenteLock);
-        if (edicionPendente.isValid()) ed = edicionPendente.createCopy();
-    }
-    if (! ed.isValid()) ed = edicion.gardar();
+    // o ton capturado e as notas editadas; no fío da mensaxe, antes pártese en notas o que se
+    // capturase coa xanela pechada (desde outro fío, vai sen partir e pártese ao abrir a xanela)
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating(); mm == nullptr || mm->isThisTheMessageThread()) edicion.actualizar (notaPermitida());
+    const auto ed = edicion.gardar();
     if (ed.isValid()) st.appendChild (ed, nullptr);
     if (auto xml = st.createXml()) copyXmlToBinary (*xml, dest);
 }
@@ -1002,7 +999,9 @@ void TuneProcessor::setStateInformation (const void* data, int size)
     auto st = juce::ValueTree::fromXml (*xml);
     // a edición vai á parte (non é dos parámetros)
     const auto ed = st.getChildWithName ("EDICION");
-    cargarEdicion (ed.createCopy());
+    // (no fío da mensaxe, xa; desde outro fío, queda pendente e cárgase no da mensaxe)
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating(); mm == nullptr || mm->isThisTheMessageThread()) edicion.cargar (ed, notaPermitida());
+    else edicion.cargarDesdeOutroFio (ed, notaPermitida());
     if (ed.isValid()) st.removeChild (ed, nullptr);
     const int from = (int) st.getProperty ("version", 0);
     migrateState (st, from);
@@ -1032,30 +1031,6 @@ void TuneProcessor::setStateInformation (const void* data, int size)
 }
 
 juce::AudioProcessorEditor* TuneProcessor::createEditor() { return new TuneEditor (*this); }
-
-// ---- edición, no fío da mensaxe: a carga que quedou pendente, partir en notas o que se
-// capturou (tamén coa xanela pechada, para que o proxecto as garde) e, se cambiou a escala,
-// levar as notas sen editar á nota de agora
-void TuneProcessor::cargarEdicion (const juce::ValueTree& ed)
-{
-    auto* mm = juce::MessageManager::getInstanceWithoutCreating();
-    if (mm == nullptr || mm->isThisTheMessageThread()) { edicion.cargar (ed, notaPermitida()); return; }
-    const juce::ScopedLock sl (edicionPendenteLock);
-    edicionPendente = ed.isValid() ? ed : juce::ValueTree ("EDICION");   // (baleira tamén: borra)
-}
-
-void TuneProcessor::edicionTick()
-{
-    juce::ValueTree ed;
-    {
-        const juce::ScopedLock sl (edicionPendenteLock);
-        std::swap (ed, edicionPendente);
-    }
-    if (ed.isValid()) edicion.cargar (ed, notaPermitida());
-    edicion.actualizar (notaPermitida());
-    const auto mascara = (uint16_t) (effectiveMask() | freeMask());
-    if (mascara != edicionMascara) { edicionMascara = mascara; edicion.redestinar (notaPermitida()); }
-}
 
 #ifndef BARULLO_NO_PLUGIN_ENTRY
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new TuneProcessor(); }

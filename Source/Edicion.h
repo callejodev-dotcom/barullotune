@@ -1,5 +1,7 @@
 #pragma once
 #include <juce_data_structures/juce_data_structures.h>
+#include <juce_events/juce_events.h>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <functional>
@@ -14,7 +16,7 @@
 // O tempo vai en tramas de 5 ms desde o comezo da liña de tempo (independente da
 // frecuencia de mostraxe). O fío de audio escribe o ton capturado e le as notas editadas
 // (atómicos, sen bloqueos nin reservas); a interface parte en notas e edita.
-class Edicion
+class Edicion : public std::enable_shared_from_this<Edicion>
 {
 public:
     static constexpr double trama = 0.005;              // segundos
@@ -76,6 +78,10 @@ public:
     // estado (vai co proxecto)
     juce::ValueTree gardar() const;
     void cargar (const juce::ValueTree&, const Permitida&);
+    // desde outro fío (hai DAW que cargan o estado así): queda pendente e cárgase no fío da
+    // mensaxe, onde a interface le as notas; mentres tanto, gardar() devolve o pendente.
+    // (Para isto a Edición vive nun shared_ptr: a carga chega aínda que o plugin xa non estea.)
+    void cargarDesdeOutroFio (const juce::ValueTree&, const Permitida&);
 
     static int destinoPorDefecto (double centro, const Permitida&);
 
@@ -90,5 +96,6 @@ private:
     int ultimaCapturada = -1;   // (fío de audio)
     // as notas cámbianse no fío da mensaxe; o estado pode pedirse desde outro (gardar)
     mutable juce::CriticalSection bloqueo;
+    juce::ValueTree pendente;
     uint32_t seguinteId = 1;
 };

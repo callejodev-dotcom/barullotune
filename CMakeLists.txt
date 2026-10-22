@@ -162,7 +162,7 @@ if(BARULLO_TESTS)
     # entre bloques: coa pila de 1 MB de Windows, cascaba antes de escribir nada
     target_link_options(BTRenderTest PRIVATE /STACK:16777216)
   endif()
-  target_compile_definitions(BTRenderTest PRIVATE BARULLO_VERSION="${PROJECT_VERSION}" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BARULLO_NO_PLUGIN_ENTRY=1)
+  target_compile_definitions(BTRenderTest PRIVATE BARULLO_VERSION="${PROJECT_VERSION}" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 BARULLO_NO_PLUGIN_ENTRY=1)
   target_link_libraries(BTRenderTest PRIVATE BTFonts juce::juce_audio_utils juce::juce_audio_processors juce::juce_audio_formats juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
   escoita_produto(BTRenderTest NOME "Barullo Tune" VERSION ${PROJECT_VERSION} REPO callejodev-dotcom/barullotune PROBA)

@@ -229,6 +229,7 @@ void Edicion::borrar()
 juce::ValueTree Edicion::gardar() const
 {
     const juce::ScopedLock sl (bloqueo);
+    if (pendente.isValid()) return pendente.createCopy();
     if (baleira()) return {};
     juce::ValueTree t ("EDICION");
     const int a = primeira.load(), b = ultima.load();
@@ -242,6 +243,8 @@ juce::ValueTree Edicion::gardar() const
     t.setProperty ("version", 1, nullptr);
     t.setProperty ("ini", a, nullptr);
     t.setProperty ("ton", mb.toBase64Encoding(), nullptr);
+    // o que aínda non se partiu en notas (capturado coa xanela pechada): pártese ao abrila
+    if (sucioIni.load() <= sucioFin.load()) { t.setProperty ("sucioIni", sucioIni.load(), nullptr); t.setProperty ("sucioFin", sucioFin.load(), nullptr); }
     for (const auto& n : notas)
     {
         juce::ValueTree c ("NOTA");
@@ -258,6 +261,7 @@ juce::ValueTree Edicion::gardar() const
 void Edicion::cargar (const juce::ValueTree& t, const Permitida& permitida)
 {
     const juce::ScopedLock sl (bloqueo);
+    pendente = {};
     borrar();
     if (! t.hasType ("EDICION")) return;
     // (vén de fóra: todo se comproba)
@@ -293,5 +297,31 @@ void Edicion::cargar (const juce::ValueTree& t, const Permitida& permitida)
     std::sort (notas.begin(), notas.end(), [] (const Nota& x, const Nota& y) { return x.ini < y.ini; });
     for (const auto& n : notas) if (n.editada) { escribirForzado (n); numEditadas.fetch_add (1); }
     seguinteId = maxId + 1;
+    const int si = (int) t.getProperty ("sucioIni", -1), sf = (int) t.getProperty ("sucioFin", -1);
+    if (si >= a && sf >= si && sf < a + len) { sucioIni = si; sucioFin = sf; }
     ++revision;
+}
+
+void Edicion::cargarDesdeOutroFio (const juce::ValueTree& t, const Permitida& permitida)
+{
+    // as notas que valen, agora (o plugin pode non estar cando chegue a carga)
+    auto vale = std::make_shared<std::array<bool, 128>>();
+    for (int n = 0; n < 128; ++n) (*vale)[(size_t) n] = ! permitida || permitida (n);
+    {
+        const juce::ScopedLock sl (bloqueo);
+        pendente = t.isValid() ? t.createCopy() : juce::ValueTree ("EDICION");   // (baleira tamén: borra)
+    }
+    std::weak_ptr<Edicion> eu = shared_from_this();
+    juce::MessageManager::callAsync ([eu, vale]
+    {
+        if (auto e = eu.lock())
+        {
+            juce::ValueTree porCargar;
+            {
+                const juce::ScopedLock sl (e->bloqueo);
+                std::swap (porCargar, e->pendente);
+            }
+            if (porCargar.isValid()) e->cargar (porCargar, [vale] (int n) { return n >= 0 && n < 128 && (*vale)[(size_t) n]; });
+        }
+    });
 }

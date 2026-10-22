@@ -222,9 +222,10 @@ public:
     float latencyMs() const { return (float) (1000.0 * realLatency.load() / juce::jmax (1.0, getSampleRate())); }
     int realLatencySamples() const { return realLatency.load(); }
 
-    // edición: o ton capturado sobre a liña de tempo do DAW e as notas editadas á man
-    Edicion edicion;
-    void edicionTick();   // no fío da mensaxe (cada 100 ms; nas probas, á man)
+    // edición: o ton capturado sobre a liña de tempo do DAW e as notas editadas á man (vive nun
+    // shared_ptr: unha carga desde outro fío remata no fío da mensaxe aínda que o plugin xa non estea)
+    std::shared_ptr<Edicion> edicionPtr = std::make_shared<Edicion>();
+    Edicion& edicion = *edicionPtr;
     // as notas ás que vai a corrección en directo (para o destino das notas sen editar)
     Edicion::Permitida notaPermitida() const
     {
@@ -300,17 +301,6 @@ private:
     std::atomic<float> chromaHeard { 0 };
 
     std::atomic<float>* pCapturar = nullptr;
-    // edición: a que chegou nun estado desde fóra do fío da mensaxe, á espera de cargarse
-    void cargarEdicion (const juce::ValueTree&);
-    juce::CriticalSection edicionPendenteLock;
-    juce::ValueTree edicionPendente;
-    uint16_t edicionMascara = 0;
-    struct ReloxoEdicion : juce::Timer
-    {
-        explicit ReloxoEdicion (TuneProcessor& x) : p (x) {}
-        void timerCallback() override { p.edicionTick(); }
-        TuneProcessor& p;
-    } reloxoEdicion { *this };
 
     std::atomic<float>* pModo, *pTonica, *pEscala, *pVel, *pCant, *pTrans, *pLa, *pMest, *pVol, *pCal, *pRango, *pForm, *pComp;
     std::atomic<float>* pTransicion, *pTol, *pTolT, *pVib, *pBypass, *pFlex, *pHuman, *pPrincipal, *pHarmMode;

@@ -1785,12 +1785,20 @@ int main (int argc, char** argv)
         const bool pendente = q.edicion.notas.empty();
         juce::MemoryBlock mb2; q.getStateInformation (mb2);   // gardar antes de cargar: non se perde
         TuneProcessor r; r.setStateInformation (mb2.getData(), (int) mb2.getSize());
-        q.edicionTick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);   // (a carga pendente, no fío da mensaxe)
         double c = 0;
         const double t = 1.2;
         const bool ok = unha && pendente && q.edicion.forzada (t, c) == 62 && r.edicion.forzada (t, c) == 62
                         && q.params.getRawParameterValue ("edicion_capturar")->load() < 0.5f;
-        check ("edición: estado desde outro fío, e capturar apagado ao abrir", ok);
+        // e coa xanela pechada: o que se capturou pártese en notas ao gardar o proxecto
+        TuneProcessor s2;
+        s2.edicion.capturando = true;
+        for (int k = 0; k < 200; ++k) s2.edicion.capturar (0.5 + k * Edicion::trama, 62.2, true);
+        s2.edicion.capturando = false;
+        juce::MemoryBlock mb3; s2.getStateInformation (mb3);
+        TuneProcessor s3; s3.setStateInformation (mb3.getData(), (int) mb3.getSize());
+        const bool partida = s2.edicion.notas.size() == 1 && s3.edicion.notas.size() == 1;
+        check ("edición: estado desde outro fío, e capturar apagado ao abrir", ok && partida);
     }
 
     // automatización ao chou: todos os parámetros, bloques de 1 a 1024 mostras, MIDI, cambios

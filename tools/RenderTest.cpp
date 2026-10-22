@@ -1625,6 +1625,104 @@ int main (int argc, char** argv)
         check ("versións novas: comparación dos números", ok);
     }
 
+    // edición: capturar a voz sobre a liña de tempo (un DAW falso), partila en notas,
+    // editar dúas (unha +2 semitonos, outra +30 cents) e, ao volver tocar, que vaian alí
+    for (const int xeito : { 0, 2 })
+    {
+        struct Cabeza : juce::AudioPlayHead
+        {
+            int64_t pos = 0;
+            juce::Optional<PositionInfo> getPosition() const override
+            {
+                PositionInfo i; i.setIsPlaying (true); i.setTimeInSamples (pos); i.setBpm (120.0);
+                return i;
+            }
+        } cabeza;
+        std::vector<double> verdade;
+        const auto voz = makeVoice (verdade);
+        TuneProcessor p;
+        p.setPlayConfigDetails (1, 1, SR, 512);
+        setP (p, "calidade", (float) xeito);
+        setP (p, "vibrato", 0);   // (sen vibrato na saída: mídese mellor)
+        p.prepareToPlay (SR, 512);
+        p.flushLatencyUpdate();
+        p.setPlayHead (&cabeza);
+        const int latEd = p.realLatencySamples();
+        auto pasada = [&] (juce::AudioBuffer<float>& out)
+        {
+            const int total = (int) voz.size() + latEd;
+            out.setSize (1, total);
+            juce::AudioBuffer<float> buf (1, 512);
+            for (int pos = 0; pos < total; pos += 512)
+            {
+                const int n = juce::jmin (512, total - pos);
+                buf.setSize (1, n, false, false, true);
+                for (int i = 0; i < n; ++i) buf.setSample (0, i, pos + i < (int) voz.size() ? voz[(size_t) (pos + i)] : 0.0f);
+                cabeza.pos = pos;
+                juce::MidiBuffer m; p.processBlock (buf, m);
+                out.copyFrom (0, pos, buf, 0, 0, n);
+            }
+        };
+        juce::AudioBuffer<float> antes, despois;
+        p.edicion.capturando = true;
+        pasada (antes);
+        p.edicion.capturando = false;
+        p.edicion.actualizar (p.notaPermitida());
+        // as notas da melodía, atopadas (polo centro de cada unha)
+        const auto mel = melody();
+        std::vector<uint32_t> idDe (mel.size(), 0);
+        double t = 0; int atopadas = 0;
+        for (size_t k = 0; k < mel.size(); ++k)
+        {
+            const int medio = (int) std::floor ((t + mel[k].dur * 0.5) / Edicion::trama);
+            for (const auto& nt : p.edicion.notas)
+                if (nt.ini <= medio && medio < nt.fin && std::abs (nt.centro - (mel[k].midi + mel[k].cents / 100.0)) < 0.35) { idDe[k] = nt.id; ++atopadas; break; }
+            t += mel[k].dur;
+        }
+        // editar: a 5.ª (Sol +42 → La) e a 9.ª (Do +15 → Do +30 cents)
+        const bool ids = idDe[4] != 0 && idDe[8] != 0;
+        if (ids)
+        {
+            p.edicion.editar (idDe[4], 69, 0.0, p.notaPermitida());
+            p.edicion.editar (idDe[8], 60, 30.0, p.notaPermitida());
+        }
+        pasada (despois);
+        // o ton da saída no medio de cada nota (media de varios puntos)
+        auto tonEn = [&] (const juce::AudioBuffer<float>& y, size_t k)
+        {
+            double ini = 0; for (size_t j = 0; j < k; ++j) ini += mel[j].dur;
+            double suma = 0; int c = 0;
+            for (double f = 0.35; f <= 0.75; f += 0.05)
+            {
+                const double v = measure (y.getReadPointer (0), y.getNumSamples(), (int64_t) ((ini + mel[k].dur * f) * SR) + latEd);
+                if (v > 0) { suma += v; ++c; }
+            }
+            return c > 0 ? suma / c : -1.0;
+        };
+        // (a voz ten vibrato e o que queda del despois de aplanalo move un pouco a medida: compárase
+        // co que fai a corrección en directo nos mesmos puntos, que xa leva á nota da escala)
+        const double n5 = tonEn (despois, 4), n9 = tonEn (despois, 8), n2 = tonEn (despois, 1);
+        const double n5a = tonEn (antes, 4), n9a = tonEn (antes, 8), n2a = tonEn (antes, 1);
+        const bool sitio = std::abs ((n5 - n5a) - 2.0) < 0.03 && std::abs ((n9 - n9a) - 0.30) < 0.03 && std::abs (n2 - n2a) < 0.01
+                           && std::abs (n5 - 69.0) < 0.15 && std::abs (n9 - 60.30) < 0.15;
+        // o estado (co proxecto): outra instancia ten as mesmas notas e as mesmas editadas
+        juce::MemoryBlock mb; p.getStateInformation (mb);
+        TuneProcessor q; q.setStateInformation (mb.getData(), (int) mb.getSize());
+        bool estado = q.edicion.notas.size() == p.edicion.notas.size();
+        for (size_t k = 0; estado && k < p.edicion.notas.size(); ++k)
+        {
+            const auto& a = p.edicion.notas[k]; const auto& b = q.edicion.notas[k];
+            estado = a.ini == b.ini && a.fin == b.fin && a.destino == b.destino && std::abs (a.cents - b.cents) < 1e-9 && a.editada == b.editada;
+        }
+        double c1 = 0, c2 = 0;
+        estado = estado && q.edicion.hayEditadas() && q.edicion.forzada ((p.edicion.buscar (idDe[8])->ini + 3) * Edicion::trama, c1) == 60
+                 && p.edicion.forzada ((p.edicion.buscar (idDe[8])->ini + 3) * Edicion::trama, c2) == 60 && std::abs (c1 - 30.0) < 1e-9;
+        std::printf ("edición (%s): %d de %zu notas atopadas, %zu en total; editadas: La %.2f (en directo %.2f), Do+30 %.2f (%.2f); sen editar: %.2f (%.2f); estado %s\n",
+                     xeito == 0 ? "Directo" : "Estudio", atopadas, mel.size(), p.edicion.notas.size(), n5, n5a, n9, n9a, n2, n2a, estado ? "ben" : "MAL");
+        check (xeito == 0 ? "edición: capturar, editar e volver tocar (Directo)" : "edición: capturar, editar e volver tocar (Estudio)",
+               ids && atopadas >= 11 && sitio && estado);
+    }
+
     // automatización ao chou: todos os parámetros, bloques de 1 a 1024 mostras, MIDI, cambios
     // de xeito e de frecuencia de mostraxe, con voz, ruído, silencio, continua, cadrada a 0 dBFS
     // e impulsos. Nada pode saír non finito nin disparado.

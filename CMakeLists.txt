@@ -101,6 +101,7 @@ juce_add_binary_data(BTFonts SOURCES
 target_sources(BarulloTune PRIVATE
   Source/PluginProcessor.cpp
   Source/PluginEditor.cpp
+  Source/Edicion.cpp
   third_party/mts-esp/libMTSClient.cpp)
 
 target_include_directories(BarulloTune PRIVATE Source third_party/mts-esp)
@@ -136,7 +137,7 @@ escoita_produto(BarulloTune NOME "Barullo Tune" VERSION ${PROJECT_VERSION} REPO 
 
 # Avisos como erros no código propio (non no de JUCE)
 option(BARULLO_WERROR "Avisos como errores en Source/ y tools/" OFF)
-set(BARULLO_OWN_SOURCES Source/PluginProcessor.cpp Source/PluginEditor.cpp tools/RenderTest.cpp)
+set(BARULLO_OWN_SOURCES Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/Edicion.cpp tools/RenderTest.cpp)
 if(BARULLO_WERROR)
   if(MSVC)
     set_source_files_properties(${BARULLO_OWN_SOURCES} PROPERTIES COMPILE_OPTIONS "/WX")
@@ -152,7 +153,7 @@ option(BARULLO_SANITIZE "Compilar la prueba con AddressSanitizer y UBSan" OFF)
 option(BARULLO_TESTS "Compilar la prueba de render" OFF)
 if(BARULLO_TESTS)
   juce_add_console_app(BTRenderTest PRODUCT_NAME "BTRenderTest")
-  target_sources(BTRenderTest PRIVATE tools/RenderTest.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp third_party/mts-esp/libMTSClient.cpp)
+  target_sources(BTRenderTest PRIVATE tools/RenderTest.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/Edicion.cpp third_party/mts-esp/libMTSClient.cpp)
   target_include_directories(BTRenderTest PRIVATE Source third_party/mts-esp)
   target_link_libraries(BTRenderTest PRIVATE ${CMAKE_DL_LIBS})
   if(MSVC)

@@ -766,6 +766,22 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             if (++scCount >= chromaHop) { scCount = 0; chromaFrame(); }
         }
     }
+    // edición: onde vai o DAW (o ton captúrase alí e as notas editadas mandan alí)
+    double t0 = -1.0;
+    bool tocando = false;
+    if (auto* ph = getPlayHead())
+        if (const auto pos = ph->getPosition())
+        {
+            tocando = pos->getIsPlaying();
+            if (const auto ts = pos->getTimeInSamples()) t0 = (double) *ts / getSampleRate();
+        }
+    if (! tocando) t0 = -1.0;
+    edicion.posicion = t0;
+    if (t0 < 0) edicion.finCaptura();
+    const bool capturar = t0 >= 0 && edicion.capturando.load();
+    const bool forzar = t0 >= 0 && edicion.hayEditadas();
+    const double dtMostra = 1.0 / getSampleRate();
+
     midiOutBuf.clear();
     auto it = midi.cbegin();
     const auto end = midi.cend();
@@ -789,6 +805,15 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         if (ech == 2) { x[0] = buffer.getReadPointer (0)[i]; x[1] = buffer.getReadPointer (1)[i]; }
         else if (numIn > 0) x[0] = buffer.getReadPointer (0)[i];
         for (auto& v : x) if (! std::isfinite (v)) v = 0;
+
+        // edición: a nota editada no punto que sae agora (o que entrou hai «lat» mostras)
+        if (forzar)
+        {
+            double cents = 0.0;
+            engine.forcedNote = edicion.forzada (t0 + (i - lat) * dtMostra, cents);
+            engine.forcedCents = cents;
+        }
+        else if (engine.forcedNote >= 0) engine.forcedNote = -1;
 
         float hv[numHarmonies] = {};
         engine.processFrame (x, wet, ech, anyHarm ? hv : nullptr);
@@ -875,7 +900,13 @@ void TuneProcessor::process (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             }
         }
         outAcc = juce::jmax (outAcc * 0.9995f, peakOut);
-        if (++frameCount >= 256) { frameCount = 0; pushFrame(); }
+        if (++frameCount >= 256)
+        {
+            frameCount = 0;
+            pushFrame();
+            // edición: o ton de agora (o detector dá o de hai uns 20 ms) no seu sitio da liña de tempo
+            if (capturar) edicion.capturar (t0 + i * dtMostra - Edicion::atrasoDeteccion, engine.inputMidi(), engine.isVoiced());
+        }
     }
     for (; it != end; ++it)
     {
@@ -925,6 +956,8 @@ void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
     params.state.setProperty ("ui", uiScale.load(), nullptr);
     params.state.setProperty ("tab", uiTab.load(), nullptr);
     auto st = params.copyState();
+    const auto ed = edicion.gardar();   // o ton capturado e as notas editadas
+    if (ed.isValid()) st.appendChild (ed, nullptr);
     if (auto xml = st.createXml()) copyXmlToBinary (*xml, dest);
 }
 
@@ -957,6 +990,10 @@ void TuneProcessor::setStateInformation (const void* data, int size)
     }
     if (xml == nullptr || ! xml->hasTagName (params.state.getType())) return;
     auto st = juce::ValueTree::fromXml (*xml);
+    // a edición vai á parte (non é dos parámetros)
+    const auto ed = st.getChildWithName ("EDICION");
+    edicion.cargar (ed, notaPermitida());
+    if (ed.isValid()) st.removeChild (ed, nullptr);
     const int from = (int) st.getProperty ("version", 0);
     migrateState (st, from);
     // un estado vello non trae os parámetros novos: van co valor de fábrica, non co que tivese esta instancia
@@ -977,7 +1014,7 @@ void TuneProcessor::setStateInformation (const void* data, int size)
         if (juce::String::fromUTF8 (presets()[(size_t) i].name) == name || getProgramName (i) == name) pr = i;
     currentPreset = juce::jlimit (0, (int) presets().size() - 1, pr);
     uiScale = juce::jlimit (0.75f, 1.5f, (float) (double) st.getProperty ("ui", 1.0));
-    uiTab = juce::jlimit (0, 3, (int) st.getProperty ("tab", 0));
+    uiTab = juce::jlimit (0, 4, (int) st.getProperty ("tab", 0));
     // os valores cambiaron todos de golpe: que o DAW os volva ler (en CLAP, «rescan»)
     updateHostDisplay (juce::AudioProcessor::ChangeDetails().withProgramChanged (true));
 }

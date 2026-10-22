@@ -32,6 +32,13 @@ struct Settings
     double noteCents[128] {};
     uint8_t noteBlocked[128] {};   // notas que o mestre de MTS-ESP non usa
 
+    // edición: unha nota editada á man no punto que se escoita (−1: ningunha). Mentres dura,
+    // o destino é esa nota (máis forcedCents) e corríxese enteira: sen tolerancia,
+    // flexibilidade nin humanizar (a velocidade, a transición e o vibrato, coma sempre)
+    int forcedNote = -1;
+    double forcedCents = 0.0;
+    bool isForced (int tgt) const { return forcedNote >= 0 && tgt == forcedNote; }
+
     // a altura (MIDI, con decimais) á que vai unha nota coa afinación
     double pitchOf (int note) const
     {
@@ -103,6 +110,8 @@ public:
     double step (CorrState& st, double m, int tgt, double dt, bool free, double bend, double& outMidi) const
     {
         const double transpose = set.transpose;
+        const bool forced = set.isForced (tgt);
+        if (forced) { free = false; bend += set.forcedCents * 0.01; }
         if (! st.active)
         {
             // comezo dunha nota: xa afinada
@@ -112,7 +121,7 @@ public:
             st.clock = 0; st.lastZc = -1e9; st.lastHalf = 0; st.vibEnv = 0; st.vibConf = 0; st.vibSign = 0;
             st.noteAge = 0;
             const double err = st.tS - m;
-            st.cS = (free || std::abs (err) * 100.0 < set.tolCents) ? 0.0 : err * set.amount * flexFactor (err);
+            st.cS = forced ? err : (free || std::abs (err) * 100.0 < set.tolCents) ? 0.0 : err * set.amount * flexFactor (err);
             st.lastTarget = tgt;
             st.genPhase = phase0; st.ampMod = 1.0;
             if (! st.seeded) { st.rng = seed; st.seeded = true; }
@@ -138,13 +147,14 @@ public:
         const double glide = clampd ((std::abs (st.slope) - 4.0) / 8.0, 0.0, 1.0);
         const double relax = clampd (set.transitionMs / 60.0, 0.0, 1.0) * glide;
         double want = 0.0;
-        if (! free)
+        if (forced) want = err * (1.0 - relax);
+        else if (! free)
         {
             const bool outside = std::abs (err) * 100.0 >= set.tolCents;
             st.tolTimer = outside ? st.tolTimer + dt : 0.0;
             if (outside && st.tolTimer >= set.tolMs * 0.001 * sr) want = err * set.amount * (1.0 - relax) * flexFactor (err);
         }
-        st.cS += (want - st.cS) * alphaFor (speedFor (st), dt);
+        st.cS += (want - st.cS) * alphaFor (forced ? set.speedMs : speedFor (st), dt);
         outMidi = centre + st.cS + set.vibrato * vib + transpose + bend + generatedVibrato (st, dt);
         return outMidi - m;
     }

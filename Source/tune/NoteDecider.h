@@ -145,7 +145,8 @@ public:
         if (was) decSlope += ((md - prevMd) / (dt / sr) - decSlope) * (1.0 - std::exp (-dt / (0.0112 * sr)));   // semitonos/s
 
         int t = target;
-        if (set.mode == Settings::MidiNote && midi.lastNote >= 0)
+        if (set.forcedNote >= 0) t = set.forcedNote;   // edición: a nota editada á man
+        else if (set.mode == Settings::MidiNote && midi.lastNote >= 0)
         {
             // nota exacta: a oitava máis próxima á voz
             t = midi.lastNote;

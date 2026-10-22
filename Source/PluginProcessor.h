@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include "tune/Engine.h"
+#include "Edicion.h"
 
 namespace scales
 {
@@ -220,6 +221,14 @@ public:
     // o atraso de verdade (en Directo declárase 0 ao DAW, pero quedan 0,25 ms)
     float latencyMs() const { return (float) (1000.0 * realLatency.load() / juce::jmax (1.0, getSampleRate())); }
     int realLatencySamples() const { return realLatency.load(); }
+
+    // edición: o ton capturado sobre a liña de tempo do DAW e as notas editadas á man
+    Edicion edicion;
+    // as notas ás que vai a corrección en directo (para o destino das notas sen editar)
+    Edicion::Permitida notaPermitida() const
+    {
+        return [this] (int n) { const int pc = ((n % 12) + 12) % 12; return (((effectiveMask() | freeMask()) >> pc) & 1) != 0; };
+    }
 
     // para a interface: historia do ton (unha trama cada 256 mostras)
     struct Frame { float inMidi, outMidi; int16_t target; uint8_t voiced; };

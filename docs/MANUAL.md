@@ -28,8 +28,8 @@ O DAW compensa a latencia ao reproducir. Directo declara 0, así que non atrasa 
 
 ## A pantalla
 
-- **Á esquerda**, a nota á que vai a voz. A agulla laranxa é a túa voz e a crema a afinada, en cents (−50 a +50); a zona verde é ±5 cents. Enriba, a latencia de verdade.
-- **Á dereita**, o ton nos últimos segundos: laranxa a túa voz, crema a afinada.
+- **Á esquerda**, a nota á que vai a voz. A agulla laranxa é a túa voz e a crema a afinada, en cents (−50 a +50); a zona verde é ±5 cents.
+- **Á dereita**, o ton nos últimos segundos: laranxa a túa voz, crema a afinada. Enriba, a latencia de verdade.
 - **Nos lados**, o nivel de entrada (In) e de saída (Out).
 - **Informe**: como afinas ti. Mira «Practicar», máis abaixo.
 

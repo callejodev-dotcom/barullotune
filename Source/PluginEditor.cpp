@@ -438,8 +438,8 @@ void Display::paintMeter (juce::Graphics& g, juce::Rectangle<float> r, float lev
 // o afinador: un medidor de agulla (laranxa a túa voz, crema a afinada) e a nota debaixo
 void Display::paintArc (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    const float R = juce::jmin (area.getWidth() * 0.5f - 46.0f, area.getHeight() * 0.48f);
-    const juce::Point<float> c (area.getCentreX(), area.getY() + 30.0f + R);
+    const float R = juce::jmin (area.getWidth() * 0.5f - 30.0f, area.getHeight() * 0.38f);
+    const juce::Point<float> c (area.getCentreX(), area.getY() + 32.0f + R);
     const float span = 1.0f;    // radiáns a cada lado (±57°)
     auto angOf = [span] (float cents) { return juce::jlimit (-50.0f, 50.0f, cents) / 50.0f * span; };
     auto at = [&] (float ang, float rad) { return juce::Point<float> (c.x + rad * std::sin (ang), c.y - rad * std::cos (ang)); };
@@ -487,7 +487,7 @@ void Display::paintArc (juce::Graphics& g, juce::Rectangle<float> area)
     }
 
     // a nota, debaixo do eixo
-    auto noteBox = juce::Rectangle<float> (area.getX(), c.y + 10.0f, area.getWidth(), area.getBottom() - c.y - 40.0f);
+    auto noteBox = juce::Rectangle<float> (area.getX(), c.y + 8.0f, area.getWidth(), area.getBottom() - c.y - 40.0f);
     if (voiced && target >= 0)
     {
         const auto name = upper (scales::noteName (target));
@@ -508,7 +508,7 @@ void Display::paintArc (juce::Graphics& g, juce::Rectangle<float> area)
         g.setColour (col::crema3);
         drawCaps (g, U ("Canta algo"), noteBox, juce::Justification::centred, 16.0f, 0.2f);
     }
-    auto info = juce::Rectangle<float> (area.getX() + 20.0f, area.getBottom() - 30.0f, area.getWidth() - 40.0f, 16.0f);
+    auto info = juce::Rectangle<float> (area.getX() + 16.0f, area.getBottom() - 30.0f, area.getWidth() - 32.0f, 16.0f);
     if (voiced)
     {
         const int cc = juce::roundToInt (outDev - inDev);
@@ -520,11 +520,6 @@ void Display::paintArc (juce::Graphics& g, juce::Rectangle<float> area)
         g.setColour (col::ouro);
         drawCaps (g, corr, info, juce::Justification::centredRight, 9.0f, 0.2f);
     }
-    // a latencia, arriba á dereita
-    const float lat = proc.latencyMs();
-    g.setColour (col::crema3);
-    drawCaps (g, U ("Latencia ") + (lat < 10.0f ? num (lat, 1) : num (lat, 0)) + " ms",
-              juce::Rectangle<float> (area.getX() + 18.0f, area.getY() + 12.0f, area.getWidth() - 36.0f, 14.0f), juce::Justification::centredRight, 8.0f, 0.22f);
 }
 
 // o ton nos últimos segundos: carrís das notas da escala, a túa voz e a afinada, con brillo
@@ -582,6 +577,11 @@ void Display::paintTrace (juce::Graphics& g, juce::Rectangle<float> box)
     glow (pathOf (false), col::laranxa, 1.5f);
     glow (pathOf (true), col::crema, 2.0f);
     g.restoreState();
+    // a latencia, arriba á dereita (á esquerda do botón do informe)
+    const float lat = proc.latencyMs();
+    g.setColour (col::crema3);
+    drawCaps (g, U ("Latencia ") + (lat < 10.0f ? num (lat, 1) : num (lat, 0)) + " ms",
+              juce::Rectangle<float> (box.getX() + 18.0f, box.getY() + 19.0f, box.getWidth() - 18.0f - 130.0f, 14.0f), juce::Justification::centredRight, 8.0f, 0.22f);
 }
 
 void Display::paint (juce::Graphics& g)
@@ -589,7 +589,7 @@ void Display::paint (juce::Graphics& g)
     auto r = getLocalBounds().toFloat();
     auto mIn = r.removeFromLeft (42.0f); r.removeFromLeft (8.0f);
     auto mOut = r.removeFromRight (42.0f); r.removeFromRight (8.0f);
-    auto tun = r.removeFromLeft (426.0f); r.removeFromLeft (8.0f);
+    auto tun = r.removeFromLeft (r.getHeight()); r.removeFromLeft (8.0f);   // o afinador, cadrado; o rastro, o resto
     paintMeter (g, mIn, inLv, "In");
     paintMeter (g, mOut, outLv, "Out");
     paintGlass (g, tun, 14.0f); paintArc (g, tun); paintGlassShine (g, tun, 14.0f);

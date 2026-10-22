@@ -3,6 +3,8 @@
 // mostra, o ton que detecta a análise fronte ao verdadeiro.
 //
 //   BTDetectorTest [--json saida.json]
+//   BTDetectorTest --volcar <caso> <ficheiro.csv>   (unha liña por trama: tempo, ton verdadeiro,
+//                                                    voz, ton detectado e claridade)
 //
 // Métricas por caso:
 //   erro   % de tramas con voz (na verdade e no detector) a máis de medio semitono do ton
@@ -209,6 +211,8 @@ Case hardCase (int id)
 
 struct Res { double err = 0, oct = 0, up = 0, miss = 0, falseV = 0; long outOfRange = 0; };
 
+FILE* volcado = nullptr;   // --volcar
+
 Res evaluate (const Case& cs, const Signal& s)
 {
     tune::Engine e;
@@ -230,6 +234,7 @@ Res evaluate (const Case& cs, const Signal& s)
         if ((i % 48) != 0 || (int) i < lag) continue;   // unha trama por milisegundo
         const double tr = s.truth[i - (size_t) lag];
         const bool tv = tr >= 0;
+        if (volcado != nullptr) std::fprintf (volcado, "%.3f,%.3f,%d,%.3f,%.3f\n", (i - (size_t) lag) / SR, tr, e.isVoiced() ? 1 : 0, e.isVoiced() ? e.inputMidi() : -1.0, det.clarity);
         // inicio de nota (para non contar o tempo que tarda en recoñecela)
         if (tv && (i - (size_t) lag < 48 || s.truth[i - (size_t) lag - 48] < 0)) sinceOnset = 0;
         sinceOnset += 1;
@@ -290,6 +295,9 @@ int main (int argc, char** argv)
             return total > 0 ? 1 : 0;
         }
 
+    std::string volcarCaso, volcarFicheiro;
+    for (int a = 1; a + 2 < argc; ++a) if (std::strcmp (argv[a], "--volcar") == 0) { volcarCaso = argv[a + 1]; volcarFicheiro = argv[a + 2]; }
+
     std::vector<Case> cases;
     auto add = [&] (const char* name, double base, auto&& fn) { Case c; c.name = name; c.notes = melody (base); fn (c); cases.push_back (c); };
     add ("limpa",            57, [] (Case&) {});
@@ -321,7 +329,10 @@ int main (int argc, char** argv)
     for (size_t k = 0; k < cases.size(); ++k)
     {
         const auto sig = synth (cases[k], cases[k].seed != 0 ? cases[k].seed : 100 + (uint32_t) k);
+        if (! volcarCaso.empty() && cases[k].name != volcarCaso) continue;
+        if (! volcarCaso.empty()) volcado = std::fopen (volcarFicheiro.c_str(), "w");
         const auto r = evaluate (cases[k], sig);
+        if (volcado != nullptr) { std::fclose (volcado); volcado = nullptr; }
         std::printf ("%-18s %6.2f%% %6.2f%% %6.2f%%  %6.2f%% %6.2f%%\n", cases[k].name.c_str(), r.err, r.oct, r.up, r.miss, r.falseV);
         if (r.outOfRange > 0) { std::printf ("   FALLO: %ld mostras con ton fóra do rango\n", r.outOfRange); bad += r.outOfRange; }
         metrics["detector." + cases[k].name + ".erro"] = r.err;

@@ -194,7 +194,8 @@ private:
         // como se mira en cada lectura, un erro solto non queda enganchado pola continuidade.
         if (best > 0 && ! common && ! combed) best = following ? octaveSwitch (best) : octaveFamily (best);
         double tau = best;
-        if (best > 1 && best < tauMax)
+        if (combed) tau = combPeriod (best);
+        else if (best > 1 && best < tauMax)
         {
             const double a = d[(size_t) best - 1], b = d[(size_t) best], c = d[(size_t) best + 1];
             const double den = a - 2 * b + c;
@@ -291,6 +292,26 @@ private:
                 return pick;
             }
         return -1;
+    }
+
+    // O período fino dun candidato dos múltiplos: cada múltiplo m·P ten o seu val e, coa
+    // parábola, dá P con m veces menos erro. Nunha voz aguda unha mostra é case un semitono
+    // (a 12 kHz, P ≈ 18) e, coa parábola dun só val con ruído, saían ±0,6 semitonos: a nota
+    // da veciña. Pésase cada múltiplo polo seu m (o seu erro en P é m veces menor)
+    double combPeriod (int best) const
+    {
+        double sum = 0, wsum = 0;
+        for (int m = 1; m <= 4 && m * best + 2 < tauMax; ++m)
+        {
+            int at = m * best;
+            for (int k = m * best - m; k <= m * best + m; ++k)
+                if (k > 1 && k + 1 < tauMax && d[(size_t) k] < d[(size_t) at]) at = k;
+            if (at <= 1 || at + 1 >= tauMax || ! (d[(size_t) at] <= d[(size_t) at - 1] && d[(size_t) at] <= d[(size_t) at + 1])) continue;
+            const double a = d[(size_t) at - 1], b = d[(size_t) at], c = d[(size_t) at + 1], den = a - 2 * b + c;
+            const double t = at + (den > 0 ? clampd (0.5 * (a - c) / den, -0.5, 0.5) : 0.0);
+            sum += t; wsum += m;   // (m · t/m)
+        }
+        return wsum > 0 ? sum / wsum : (double) best;
     }
 
     // Dentro dun período común «tc» (múltiplo de «old», a nota que remata), a nota nova: o

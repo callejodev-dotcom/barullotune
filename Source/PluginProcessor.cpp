@@ -471,76 +471,14 @@ void TuneProcessor::chromaFrame()
     chromaHeard = chromaHeard.load() + dt;
 }
 
-// ---- A/B e presets propios ----
-// Unha foto de todos os parámetros (agás bypass e comparar): <PARAMS><P id=.. v=../>…
-juce::ValueTree TuneProcessor::snapshotParams() const
+// ---- A/B e presets propios: o estado do núcleo, cos datos de Barullo Tune ----
+escoita::Estado::Opcions TuneProcessor::opcionsEstado()
 {
-    juce::ValueTree t ("PARAMS");
-    for (auto* prm : getParameters())
-        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
-        {
-            if (rp->paramID == "bypass" || rp->paramID == "comparar") continue;
-            juce::ValueTree c ("P");
-            c.setProperty ("id", rp->paramID, nullptr);
-            c.setProperty ("v", rp->convertFrom0to1 (rp->getValue()), nullptr);
-            t.appendChild (c, nullptr);
-        }
-    return t;
-}
-
-void TuneProcessor::applyParams (const juce::ValueTree& snap)
-{
-    undo.beginNewTransaction();
-    for (auto c : snap)
-        if (auto* rp = params.getParameter (c.getProperty ("id").toString()))
-            setParamPlain (rp->paramID, (float) (double) c.getProperty ("v"));
-}
-
-void TuneProcessor::abSwitch()
-{
-    abState[abSlot] = snapshotParams();
-    abSlot = 1 - abSlot;
-    if (! abState[abSlot].isValid()) abState[abSlot] = abState[1 - abSlot].createCopy();
-    applyParams (abState[abSlot]);
-}
-
-void TuneProcessor::abCopy()
-{
-    abState[1 - abSlot] = snapshotParams();
-}
-
-juce::File TuneProcessor::presetFolder() const
-{
-    if (userFolder != juce::File()) return userFolder;
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Barullo Tune").getChildFile ("Presets");
-}
-
-juce::Array<juce::File> TuneProcessor::userPresets() const
-{
-    auto files = presetFolder().findChildFiles (juce::File::findFiles, false, "*.btpreset");
-    files.sort();
-    return files;
-}
-
-bool TuneProcessor::saveUserPreset (const juce::String& name)
-{
-    const auto clean = juce::File::createLegalFileName (name.trim());
-    if (clean.isEmpty()) return false;
-    auto dir = presetFolder();
-    if (! dir.createDirectory()) return false;
-    auto snap = snapshotParams();
-    snap.setProperty ("version", stateVersion, nullptr);
-    snap.setProperty ("plugin", BARULLO_VERSION, nullptr);
-    if (auto xml = snap.createXml()) return xml->writeTo (dir.getChildFile (clean + ".btpreset"));
-    return false;
-}
-
-bool TuneProcessor::loadUserPreset (const juce::File& file)
-{
-    auto xml = juce::parseXML (escoita::lerTexto (file));
-    if (xml == nullptr || ! xml->hasTagName ("PARAMS")) return false;
-    applyParams (juce::ValueTree::fromXml (*xml));
-    return true;
+    escoita::Estado::Opcions o;
+    o.extension = "btpreset";
+    o.excluir = { "bypass", "comparar" };
+    o.version = stateVersion;
+    return o;
 }
 
 // ---- gravar e escoitarse

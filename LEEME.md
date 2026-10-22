@@ -137,7 +137,7 @@ A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 
 ## O núcleo común
 
-O que comparten os plugins de Escoita vai en [escoita-nucleo](https://github.com/callejodev-dotcom/escoita-nucleo): o aviso das versións novas, o texto en galego (maiúsculas con acentos, texto de fóra en UTF-8 ou Latin-1), a CI común e os instaladores. A versión que se usa fíxase en `CMakeLists.txt` (`ESCOITA_NUCLEO_VERSION`) e en `.github/workflows/build.yml` (`@v…`). Se clonas `escoita-nucleo` ao lado deste cartafol, a compilación local usa esa copia (para mellorar o núcleo e probalo aquí á vez).
+O que comparten os plugins de Escoita vai en [escoita-nucleo](https://github.com/callejodev-dotcom/escoita-nucleo): o aviso das versións novas, os presets propios, o A/B e o desfacer, o texto en galego (maiúsculas con acentos, texto de fóra en UTF-8 ou Latin-1), a CI común e os instaladores. A versión que se usa fíxase en `CMakeLists.txt` (`ESCOITA_NUCLEO_VERSION`) e en `.github/workflows/build.yml` (`@v…`). Se clonas `escoita-nucleo` ao lado deste cartafol, a compilación local usa esa copia (para mellorar o núcleo e probalo aquí á vez).
 
 ## Créditos
 

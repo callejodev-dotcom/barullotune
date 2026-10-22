@@ -1077,7 +1077,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     {
         abBtn[i].setButtonText (i == 0 ? "A" : "B");
         abBtn[i].setTooltip (U ("A/B: dous xogos de axustes para comparar. Cambiar de lado garda o actual. Para copiar un lado no outro, no menú dos presets."));
-        abBtn[i].onClick = [this, i] { if (i != proc.abCurrent()) proc.abSwitch(); refresh(); };
+        abBtn[i].onClick = [this, i] { if (i != proc.estado.lado()) proc.estado.cambiarLado(); refresh(); };
         canvas.addAndMakeVisible (abBtn[i]);
     }
     compare.setButtonText (U ("Comparar"));
@@ -1365,7 +1365,7 @@ void TuneEditor::rebuildPresetMenu()
     auto* menu = preset.getRootMenu();
     menu->addSectionHeader (U ("De fábrica"));
     for (int i = 0; i < proc.getNumPrograms(); ++i) preset.addItem (proc.getProgramName (i), i + 1);
-    const auto user = proc.userPresets();
+    const auto user = proc.estado.presets();
     if (! user.isEmpty())
     {
         menu->addSectionHeader (U ("Os teus"));
@@ -1374,7 +1374,7 @@ void TuneEditor::rebuildPresetMenu()
     preset.addSeparator();
     preset.addItem (U ("Gardar como preset…"), 1000);
     preset.addItem (U ("Abrir a carpeta dos presets"), 1001);
-    preset.addItem (proc.abCurrent() == 0 ? U ("Copiar A en B") : U ("Copiar B en A"), 1002);
+    preset.addItem (proc.estado.lado() == 0 ? U ("Copiar A en B") : U ("Copiar B en A"), 1002);
     menu->addItem (1003, U ("Avisar das versións novas"), true, updates->enabled());
     lastPresetList.clear();
     for (auto& f : user) lastPresetList << f.getFileName() << "|";
@@ -1387,32 +1387,22 @@ void TuneEditor::presetChosen()
     if (id >= 1 && id <= proc.getNumPrograms()) { proc.undo.beginNewTransaction(); proc.setCurrentProgram (id - 1); refresh(); return; }
     if (id >= 101 && id < 1000)
     {
-        const auto user = proc.userPresets();
-        if (juce::isPositiveAndBelow (id - 101, user.size())) proc.loadUserPreset (user[id - 101]);
+        const auto user = proc.estado.presets();
+        if (juce::isPositiveAndBelow (id - 101, user.size())) proc.estado.cargar (user[id - 101]);
         const auto name = preset.getItemText (preset.indexOfItemId (id));
         preset.setText (name, juce::dontSendNotification);
         refresh();
         return;
     }
     preset.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
-    if (id == 1000)
-    {
-        auto* w = new juce::AlertWindow (U ("Gardar preset"), U ("Nome do preset (garda todos os axustes):"), juce::MessageBoxIconType::NoIcon);
-        w->addTextEditor ("nome", "", "");
-        w->addButton (U ("Gardar"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-        w->addButton (U ("Cancelar"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-        w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int r)
-        {
-            if (r == 1 && proc.saveUserPreset (w->getTextEditorContents ("nome"))) rebuildPresetMenu();
-        }), true);
-    }
+    if (id == 1000) proc.estado.gardarComo ([sp = juce::Component::SafePointer<TuneEditor> (this)] (bool ok) { if (ok && sp != nullptr) sp->rebuildPresetMenu(); });
     else if (id == 1001)
     {
-        const auto dir = proc.presetFolder();
+        const auto dir = proc.estado.carpeta();
         dir.createDirectory();
         dir.startAsProcess();
     }
-    else if (id == 1002) proc.abCopy();
+    else if (id == 1002) proc.estado.copiarAoOutro();
     else if (id == 1003)
     {
         updates->setEnabled (! updates->enabled());
@@ -1460,7 +1450,7 @@ void TuneEditor::refresh()
     seg (harmMode, 2, "armonia_modo");
     link.setToggleState (proc.params.getRawParameterValue ("ligar")->load() > 0.5f, juce::dontSendNotification);
     compare.setToggleState (proc.params.getRawParameterValue ("comparar")->load() > 0.5f, juce::dontSendNotification);
-    for (int i = 0; i < 2; ++i) abBtn[i].setToggleState (i == proc.abCurrent(), juce::dontSendNotification);
+    for (int i = 0; i < 2; ++i) abBtn[i].setToggleState (i == proc.estado.lado(), juce::dontSendNotification);
     undoBtn.setEnabled (proc.undo.canUndo());
     redoBtn.setEnabled (proc.undo.canRedo());
     recBtn.setToggleState (proc.isRecording(), juce::dontSendNotification);
@@ -1503,7 +1493,7 @@ void TuneEditor::timerCallback()
     if (++countdown >= 60)
     {
         countdown = 0;
-        juce::String now; for (auto& f : proc.userPresets()) now << f.getFileName() << "|";
+        juce::String now; for (auto& f : proc.estado.presets()) now << f.getFileName() << "|";
         if (now != lastPresetList && ! preset.isPopupActive()) rebuildPresetMenu();
         refreshUpdate();
     }

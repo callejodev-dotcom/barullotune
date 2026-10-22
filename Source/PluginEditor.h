@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
+#include "Actualizacions.h"
 
 namespace ui
 {
@@ -175,6 +176,13 @@ private:
         void paintButton (juce::Graphics&, bool over, bool down) override;
         bool isRecord;
     };
+    // o aviso dunha versión nova, no pé (unha ligazón á páxina de descargas)
+    struct UpdateButton : juce::Button
+    {
+        UpdateButton() : juce::Button ("actualizar") {}
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+        juce::String version;
+    };
     // botón de desfacer / refacer (unha frecha en arco)
     struct ArrowButton : juce::Button
     {
@@ -238,6 +246,9 @@ private:
     juce::TextButton detect, scl, modeBtn[3];
     std::unique_ptr<juce::FileChooser> chooser;
     juce::String lastPresetList;
+    juce::SharedResourcePointer<actualizacions::Checker> updates;
+    UpdateButton updateBtn;
+    void refreshUpdate();
     // os grupos de mandos de cada pestana (o rótulo e o seu ancho), para debuxalos
     std::vector<std::pair<juce::Rectangle<int>, juce::String>> groups[numTabs];
 

@@ -1617,6 +1617,14 @@ int main (int argc, char** argv)
         check ("texto de fóra: .scl en Latin-1 e UTF-8 cortado", okL && okC);
     }
 
+    // o aviso das versións novas compara os números, non o texto (0.10 vai despois de 0.9)
+    {
+        using actualizacions::isNewer;
+        const bool ok = isNewer ("v0.3.1", "0.3.0") && isNewer ("0.10.0", "0.9.9") && isNewer ("1.0", "0.9.9")
+                        && ! isNewer ("v0.3.0", "0.3.0") && ! isNewer ("0.2.9", "0.3.0") && ! isNewer ("", "0.3.0") && ! isNewer ("lixo", "0.3.0");
+        check ("versións novas: comparación dos números", ok);
+    }
+
     // automatización ao chou: todos os parámetros, bloques de 1 a 1024 mostras, MIDI, cambios
     // de xeito e de frecuencia de mostraxe, con voz, ruído, silencio, continua, cadrada a 0 dBFS
     // e impulsos. Nada pode saír non finito nin disparado.

@@ -1035,6 +1035,21 @@ void TuneEditor::TransportButton::paintButton (juce::Graphics& g, bool over, boo
     else { juce::Path t; t.addTriangle (c.x - 3.5f, c.y - 5.5f, c.x - 3.5f, c.y + 5.5f, c.x + 5.5f, c.y); g.fillPath (t); }
 }
 
+void TuneEditor::UpdateButton::paintButton (juce::Graphics& g, bool over, bool)
+{
+    using namespace ui;
+    const auto t = upper (U ("Versión nova: ") + version + U (" · descargala"));
+    const auto f = caps (8.5f, 0.2f);
+    const float tw = juce::GlyphArrangement::getStringWidth (f, t);
+    auto r = getLocalBounds().toFloat();
+    const float x0 = r.getCentreX() - (tw + 16.0f) * 0.5f;
+    paintLed (g, { x0 + 3.0f, r.getCentreY() }, true);
+    g.setColour (over ? col::crema : col::laranxa);
+    g.setFont (f);
+    g.drawText (t, juce::Rectangle<float> (x0 + 14.0f, r.getY(), tw + 4.0f, r.getHeight()), juce::Justification::centredLeft, false);
+    if (hasKeyboardFocus (false)) { g.setColour (col::laranxa); g.drawRoundedRectangle (r.reduced (1.0f), 6.0f, 1.2f); }
+}
+
 bool TuneEditor::standaloneUi() const
 {
     return proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone || std::getenv ("BT_STANDALONE") != nullptr;
@@ -1110,6 +1125,9 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
         refresh();
     };
     if (standaloneUi()) { canvas.addAndMakeVisible (recBtn); canvas.addAndMakeVisible (playBtn); }
+    // o aviso dunha versión nova (no pé, só cando a hai)
+    updateBtn.onClick = [] { juce::URL (actualizacions::downloadsUrl()).launchInDefaultBrowser(); };
+    canvas.addChildComponent (updateBtn);
 
     const char* cals[3] = { "Directo", "Preciso", "Estudio" };
     const char* calTips[3] = {
@@ -1270,6 +1288,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     setResizeLimits (W * 3 / 4, H * 3 / 4, W * 3 / 2, H * 3 / 2);
     if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) W / (double) H);
     refresh();
+    refreshUpdate();
     startTimerHz (30);
 }
 
@@ -1370,6 +1389,7 @@ void TuneEditor::rebuildPresetMenu()
     preset.addItem (U ("Gardar como preset…"), 1000);
     preset.addItem (U ("Abrir a carpeta dos presets"), 1001);
     preset.addItem (proc.abCurrent() == 0 ? U ("Copiar A en B") : U ("Copiar B en A"), 1002);
+    menu->addItem (1003, U ("Avisar das versións novas"), true, updates->enabled());
     lastPresetList.clear();
     for (auto& f : user) lastPresetList << f.getFileName() << "|";
     preset.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
@@ -1407,6 +1427,24 @@ void TuneEditor::presetChosen()
         dir.startAsProcess();
     }
     else if (id == 1002) proc.abCopy();
+    else if (id == 1003)
+    {
+        updates->setEnabled (! updates->enabled());
+        refreshUpdate();
+        juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<TuneEditor> (this)] { if (sp != nullptr) sp->rebuildPresetMenu(); });
+    }
+}
+
+// o aviso da versión nova: aparece cando o fío das versións sabe dunha
+void TuneEditor::refreshUpdate()
+{
+    const auto v = updates->newVersion();
+    if (v == updateBtn.version && updateBtn.isVisible() == v.isNotEmpty()) return;
+    updateBtn.version = v;
+    updateBtn.setTitle (U ("Hai unha versión nova: ") + v);
+    updateBtn.setTooltip (U ("Tes a ") + BARULLO_VERSION + U (". Abre a páxina de descargas de Barullo Tune para baixar a ") + v + ".");
+    updateBtn.setVisible (v.isNotEmpty());
+    canvas.repaint (0, lay::footY - 4, W, 24);
 }
 
 void TuneEditor::importScala()
@@ -1481,6 +1519,7 @@ void TuneEditor::timerCallback()
         countdown = 0;
         juce::String now; for (auto& f : proc.userPresets()) now << f.getFileName() << "|";
         if (now != lastPresetList && ! preset.isPopupActive()) rebuildPresetMenu();
+        refreshUpdate();
     }
 }
 
@@ -1592,7 +1631,8 @@ void TuneEditor::paintCanvas (juce::Graphics& g)
         drawCaps (g, ".", r.withTrimmedLeft (we - 2.0f), juce::Justification::centredLeft, 8.0f, 0.3f);
         g.setColour (col::crema3);
         drawCaps (g, U (" Laboratorio creativo"), r.withTrimmedLeft (we + 3.0f), juce::Justification::centredLeft, 8.0f, 0.3f);
-        drawCaps (g, U ("Clic dereito nun mando: escribir o valor · maiúsculas: fino"), r, juce::Justification::centred, 8.0f, 0.2f);
+        if (! updateBtn.isVisible())
+            drawCaps (g, U ("Clic dereito nun mando: escribir o valor · maiúsculas: fino"), r, juce::Justification::centred, 8.0f, 0.2f);
         drawCaps (g, U ("42°14′N 8°43′W"), r, juce::Justification::centredRight, 8.0f, 0.3f);
     }
 }
@@ -1685,4 +1725,5 @@ void TuneEditor::layout()
     afin.setBounds (456, selY, 176, selH);
     scl.setBounds (638, selY, 56, selH);
     keyboard.setBounds (16, kbY, W - 32, kbH);
+    updateBtn.setBounds (W / 2 - 200, footY - 4, 400, 22);
 }

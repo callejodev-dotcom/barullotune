@@ -105,6 +105,7 @@ Enriba dos mandos, á dereita, o modo e **Detectar**; na fila de enriba do tecla
 - **A/B**: dous xogos de axustes para comparar. Cambiar de lado garda o actual; no menú dos presets podes copiar un lado no outro.
 - **Desfacer e refacer**: as frechas da cabeceira.
 - **Comparar**: escoitas a voz sen afinar, aliñada e sen armonías.
+- **Versións novas**: unha vez ao día, Barullo Tune pregunta a GitHub cal é a última versión (non manda ningún dato teu). Se hai unha nova, avisa no pé da interface; un clic abre a páxina de descargas. Desactívase no menú dos presets, en «Avisar das versións novas».
 
 ## Practicar
 

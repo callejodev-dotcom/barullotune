@@ -9,6 +9,7 @@ Unha ferramenta de [Escoita](https://www.escoita.link). Manual: [docs/MANUAL.md]
 - **Teclado de cinco oitavas** (Do1–Do6) con teclas de verdade: a cor di se a nota está na escala, fóra ou libre, e a que cantas acéndese.
 - **Medidores de LED** de entrada e saída, e tipografías Montserrat e Inter.
 - **Voz aguda e aireada**: o detector xa non baixa dúas oitavas (erros 4,7 → 1,4 %).
+- **Aviso das versións novas**: unha vez ao día pregúntase a GitHub cal é a última (sen mandar ningún dato) e, se hai unha nova, avísase no pé. Desactívase no menú dos presets.
 
 ## Novidades na 0.2.2
 

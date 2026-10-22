@@ -1608,18 +1608,18 @@ int main (int argc, char** argv)
         // texto de fóra: un .scl en Latin-1 (moitos de Windows) cárgase igual, e o UTF-8 cortado
         // dá un texto válido
         const char latin1[] = "! ptolemy.scl\n!\nEscala diat\xF3nica de Ptolomeo\n 7\n!\n 9/8\n 5/4\n 4/3\n 3/2\n 5/3\n 15/8\n 2/1\n";
-        const auto tl = TuneProcessor::textFromBytes (latin1, sizeof (latin1) - 1);
+        const auto tl = escoita::textoDeBytes (latin1, sizeof (latin1) - 1);
         juce::String errL;
         const bool okL = sc.loadScala (tl, errL) && sc.effectiveMask() == want && tl.contains (juce::String::fromUTF8 ("diatónica"));
         const unsigned char cut[] = { 'a', 'b', 0xC3 };   // unha «ó» cortada
-        const auto tc = TuneProcessor::textFromBytes (cut, sizeof (cut));
+        const auto tc = escoita::textoDeBytes (cut, sizeof (cut));
         const bool okC = tc.length() == 3 && juce::CharPointer_UTF8::isValidString (tc.toRawUTF8(), (int) tc.getNumBytesAsUTF8());
         check ("texto de fóra: .scl en Latin-1 e UTF-8 cortado", okL && okC);
     }
 
     // o aviso das versións novas compara os números, non o texto (0.10 vai despois de 0.9)
     {
-        using actualizacions::isNewer;
+        const auto isNewer = escoita::versionNova;
         const bool ok = isNewer ("v0.3.1", "0.3.0") && isNewer ("0.10.0", "0.9.9") && isNewer ("1.0", "0.9.9")
                         && ! isNewer ("v0.3.0", "0.3.0") && ! isNewer ("0.2.9", "0.3.0") && ! isNewer ("", "0.3.0") && ! isNewer ("lixo", "0.3.0");
         check ("versións novas: comparación dos números", ok);

@@ -56,14 +56,14 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 |---|---|
 | `Source/tune/` | O motor, en pezas: `Analysis.h` (detector, marcas de ciclo, ton deslizante e decisión da nota, común a todas as voces), `DirectVoice.h` (Directo e Preciso), `StudioVoice.h` (Estudio, PSOLA), `NoteDecider.h` (a nota de destino, as notas das armonías e o MIDI), `Correction.h` (axustes e modelo de corrección), `FormantFix.h`, `PitchDetector.h`, `Dsp.h` e `Engine.h`, que as xunta. Como funciona: Detector de ton tipo YIN (sinal diezmada a ~12 kHz, cada 4 ms), con continuidade e confirmación ao comezar. Marcas de ciclo aliñadas por correlación, con precisión de fracción de mostra. Lectura entre mostras con sinc de 16 puntos (agudos planos ata 16 kHz). **Directo** e **Preciso**: a voz lese a outra velocidade e salta un ciclo enteiro cando se adianta ou se atrasa (fundido de 0,6 ms). En Directo a lectura vai a 12 mostras da última que entrou (0,25 ms, o que mira adiante o interpolador e unha marxe) e, ao subir o ton, salta antes na medida que pide o fundido para non pasar a escritura (a marxe enteira só ao subir unha oitava); o punto de salto escóllese comparando medio ciclo arredor da lectura, cara atrás se cara adiante aínda non hai voz. Ao DAW declárase latencia 0: o que queda non é un atraso fixo que poida compensar; o ton mídese cada poucas mostras nunha xanela deslizante de período e medio que acaba na última mostra (correlación normalizada arredor do período anterior, con parábola): as medidas solápanse, así non teñen o tremor dun ciclo solto, e o ton no punto que se le interpólase entre elas (en Directo, extrapólase un anaco coa tendencia dos últimos tres cuartos de período, que pode seguir subidas de ata 90 semitonos/s; en Preciso, a lectura vai 11,5 ms detrás e sempre cae entre medidas). O ton mírase 0,4 ms por diante do punto de lectura, o mesmo que tarda o suavizado da corrección, para que a corrección chegue a tempo. Ao transpor ou mover os formantes, unha **corrección de formantes sen latencia** mide cada 5 ms a envolvente (predición lineal de orde ~37) da voz orixinal e da lida, e coa lida fai: branquear coa súa envolvente e colorear coa orixinal (celosías con coeficientes de reflexión interpolados, sempre estables). **Estudio**: TD-PSOLA en tempo real, cada grano corrixido co seu propio período, e formantes lendo o grano a outra velocidade. Modelo de corrección común: o vibrato sepárase cun filtro de banda (3–8 Hz) e só se respecta se é regular (medios ciclos de 60–140 ms parecidos entre si e máis de 8 cents): a oscilación irregular dunha voz insegura corríxese coma calquera desafinación; o centro vai á nota con «velocidade», a nota de destino móvese con «transición» e o vibrato volve sumarse. Nos portamentos (a voz movéndose máis de 4 semitonos/s) a corrección sóltase en proporción á transición, para non arrastrar a voz cara á nota anterior; e a nota nova acéptase xa se a voz vai claramente cara a ela. |
 | `Source/Plugin*.cpp` | O plugin JUCE e a interface |
-| `Source/Actualizacions.cpp` | O aviso das versións novas (unha pregunta ao día a GitHub, nun fío aparte) |
 | `tools/RenderTest.cpp` | Proba sen interface; con `--file entrada.wav saida.wav parámetro=valor…` procesa un ficheiro; con `--json metricas.json` garda as métricas; imprime a **huella da saída** (para comprobar que un cambio de organización non cambia nin un bit) |
 | `tools/DetectorTest.cpp` | O detector en condicións difíciles, con ton verdadeiro coñecido (só o motor, sen JUCE): segundo harmónico dominante, sen fundamental, voz aireada, ruído a 10 e 5 dB, reverberación, voz grave, soprano e vibrato ancho |
 | `tools/compara.py` | Compara as métricas coa base (`tools/metricas-base.json`, `tools/banco-base.json`) e falla se algo empeora; con `--gardar` actualiza a base |
 | `tools/banco.py` | Banco de voces reais: cada voz polos tres xeitos, con cents, saltos (a saída sepárase máis de 1,6 semitonos da entrada durante 30 ms ou máis) e perdas |
 | `tools/analise.py` | Mide a afinación dunha voz antes e despois (YIN, vibrato, centro das notas, gráfico) |
 | `tools/voces/LEEME.md` | De onde saen as voces reais das probas |
-| `packaging/` | Instaladores para Mac, Windows e Linux |
+| `packaging/` | Os datos do produto (`produto.env`), os LEEME dos instaladores e as notas da versión; os instaladores fanse co núcleo |
+| `tools/probas-ci.sh` | As probas que pasa a CI en cada sistema |
 | `docs/` | O manual; as capturas fanse soas con `tools/capturas.sh` |
 
 ## Probas
@@ -135,6 +135,10 @@ git tag v0.3.0 && git push origin v0.3.0
 
 A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 
+## O núcleo común
+
+O que comparten os plugins de Escoita vai en [escoita-nucleo](https://github.com/callejodev-dotcom/escoita-nucleo): o aviso das versións novas, o texto en galego (maiúsculas con acentos, texto de fóra en UTF-8 ou Latin-1), a CI común e os instaladores. A versión que se usa fíxase en `CMakeLists.txt` (`ESCOITA_NUCLEO_VERSION`) e en `.github/workflows/build.yml` (`@v…`). Se clonas `escoita-nucleo` ao lado deste cartafol, a compilación local usa esa copia (para mellorar o núcleo e probalo aquí á vez).
+
 ## Créditos
 
 - Detector de ton baseado en YIN (de Cheveigné e Kawahara, 2002). Desprazamento por TD-PSOLA (Moulines e Charpentier, 1990). Código propio.
@@ -144,4 +148,4 @@ A versión sae da liña `project(BarulloTune VERSION …)` de `CMakeLists.txt`.
 
 Barullo Tune é software libre: publícase baixo a licenza **GNU Affero General Public License v3.0** (ficheiro `LICENSE`). Podes usalo, estudalo, modificalo e compartilo; se distribúes unha versión modificada, ten que ir co seu código e baixo a mesma licenza.
 
-Usa JUCE 8 baixo a súa licenza AGPLv3 e, para o formato CLAP, clap-juce-extensions (licenza MIT). As tipografías Montserrat e Inter van coas súas licenzas OFL (`Resources/Montserrat-OFL.txt` e `Resources/Inter-OFL.txt`). O instalador de Windows en galego usa a tradución non oficial de Inno Setup feita por MdL (`packaging/Galician.isl`).
+Usa JUCE 8 baixo a súa licenza AGPLv3 e, para o formato CLAP, clap-juce-extensions (licenza MIT). As tipografías Montserrat e Inter van coas súas licenzas OFL (`Resources/Montserrat-OFL.txt` e `Resources/Inter-OFL.txt`). O instalador de Windows en galego usa a tradución non oficial de Inno Setup feita por MdL (vai no núcleo).

@@ -26,26 +26,12 @@ static juce::Typeface::Ptr tf (int which)
 juce::Font body (float s) { return juce::Font (juce::FontOptions (tf (0)).withHeight (s)); }
 juce::Font semi (float s) { return juce::Font (juce::FontOptions (tf (1)).withHeight (s)); }
 juce::Font cond (float s) { return juce::Font (juce::FontOptions (tf (2)).withHeight (s)); }
-// maiúsculas tamén para as letras con acento (o towupper do sistema non sempre as sabe)
-juce::String upper (const juce::String& t)
-{
-    juce::String out;
-    out.preallocateBytes (t.getNumBytesAsUTF8());
-    for (auto p = t.getCharPointer(); ! p.isEmpty();)
-    {
-        auto c = p.getAndAdvance();
-        if (c >= 'a' && c <= 'z') c -= 32;
-        else if (c >= 0xe0 && c <= 0xfe && c != 0xf7) c -= 32;   // à…þ (á, é, í, ó, ú, ñ, ü)
-        out += c;
-    }
-    return out;
-}
 juce::Font caps (float s, float tracking) { return juce::Font (juce::FontOptions (tf (1)).withHeight (s).withKerningFactor (tracking)); }
 
 void drawCaps (juce::Graphics& g, const juce::String& t, juce::Rectangle<float> r, juce::Justification j, float size, float tracking)
 {
     g.setFont (caps (size, tracking));
-    g.drawText (upper (t), r, j, false);
+    g.drawText (maiusculas (t), r, j, false);
 }
 
 // texto dun visor: dourado, cun pouco de brillo
@@ -214,7 +200,7 @@ void Look::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool over, bo
     if (! b.isEnabled()) c = col::crema3.withAlpha (0.6f);
     g.setColour (c);
     g.setFont (caps ((float) b.getProperties().getWithDefault ("fontSize", 9.5f), 0.17f));
-    g.drawFittedText (upper (b.getButtonText()), r.toNearestInt().reduced (5, 0), juce::Justification::centred, 1, 0.7f);
+    g.drawFittedText (maiusculas (b.getButtonText()), r.toNearestInt().reduced (5, 0), juce::Justification::centred, 1, 0.7f);
 }
 
 // os mandos: un disco mecanizado cun anel de LED laranxa e, debaixo, o valor nun visor
@@ -270,7 +256,7 @@ void Look::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, floa
     // o visor co valor
     paintWell (g, lcd, 5.0f);
     g.setFont (caps (10.0f, 0.08f));
-    glowText (g, upper (s.getTextFromValue (s.getValue()).replaceCharacter ('.', ',')), lcd, juce::Justification::centred,
+    glowText (g, maiusculas (s.getTextFromValue (s.getValue()).replaceCharacter ('.', ',')), lcd, juce::Justification::centred,
               s.isEnabled() ? col::ouro : col::crema3);
 }
 
@@ -301,7 +287,7 @@ void Look::drawLabel (juce::Graphics& g, juce::Label& l)
     if (dynamic_cast<juce::ComboBox*> (l.getParentComponent()) != nullptr)
     {
         // o texto dun selector: dourado e en maiúsculas, coma un visor (estreitado se non colle)
-        const auto t = upper (l.getText());
+        const auto t = maiusculas (l.getText());
         const auto r = l.getLocalBounds().toFloat().reduced (2.0f, 0.0f);
         auto f = getLabelFont (l);
         const float tw = juce::GlyphArrangement::getStringWidth (f, t);
@@ -490,7 +476,7 @@ void Display::paintArc (juce::Graphics& g, juce::Rectangle<float> area)
     auto noteBox = juce::Rectangle<float> (area.getX(), c.y + 8.0f, area.getWidth(), area.getBottom() - c.y - 40.0f);
     if (voiced && target >= 0)
     {
-        const auto name = upper (scales::noteName (target));
+        const auto name = maiusculas (scales::noteName (target));
         const auto oct = juce::String (target / 12 - 2);
         const auto big = cond (50.0f).withExtraKerningFactor (0.04f), small = semi (20.0f);
         const float wn = juce::GlyphArrangement::getStringWidth (big, name), wo = juce::GlyphArrangement::getStringWidth (small, oct);
@@ -515,7 +501,7 @@ void Display::paintArc (juce::Graphics& g, juce::Rectangle<float> area)
         g.setColour (col::crema2);
         drawCaps (g, num (hz, 1) + " Hz", info, juce::Justification::centredLeft, 9.0f, 0.2f);
         const auto corr = (cc > 0 ? "+" : "") + juce::String (cc).replace ("-", U ("−")) + " c";
-        drawCaps (g, U ("Corrixe"), info.withTrimmedRight (juce::GlyphArrangement::getStringWidth (caps (9.0f, 0.2f), upper (corr)) + 8.0f),
+        drawCaps (g, U ("Corrixe"), info.withTrimmedRight (juce::GlyphArrangement::getStringWidth (caps (9.0f, 0.2f), maiusculas (corr)) + 8.0f),
                   juce::Justification::centredRight, 9.0f, 0.2f);
         g.setColour (col::ouro);
         drawCaps (g, corr, info, juce::Justification::centredRight, 9.0f, 0.2f);
@@ -1038,7 +1024,7 @@ void TuneEditor::TransportButton::paintButton (juce::Graphics& g, bool over, boo
 void TuneEditor::UpdateButton::paintButton (juce::Graphics& g, bool over, bool)
 {
     using namespace ui;
-    const auto t = upper (U ("Versión nova: ") + version + U (" · descargala"));
+    const auto t = maiusculas (U ("Versión nova: ") + version + U (" · descargala"));
     const auto f = caps (8.5f, 0.2f);
     const float tw = juce::GlyphArrangement::getStringWidth (f, t);
     auto r = getLocalBounds().toFloat();
@@ -1126,7 +1112,7 @@ TuneEditor::TuneEditor (TuneProcessor& p) : AudioProcessorEditor (p), proc (p)
     };
     if (standaloneUi()) { canvas.addAndMakeVisible (recBtn); canvas.addAndMakeVisible (playBtn); }
     // o aviso dunha versión nova (no pé, só cando a hai)
-    updateBtn.onClick = [] { juce::URL (actualizacions::downloadsUrl()).launchInDefaultBrowser(); };
+    updateBtn.onClick = [] { juce::URL (escoita::Actualizacions::downloadsUrl()).launchInDefaultBrowser(); };
     canvas.addChildComponent (updateBtn);
 
     const char* cals[3] = { "Directo", "Preciso", "Estudio" };
@@ -1456,7 +1442,7 @@ void TuneEditor::importScala()
         if (! f.existsAsFile()) return;
         juce::String err;
         proc.undo.beginNewTransaction();
-        if (! proc.loadScala (TuneProcessor::readTextFile (f), err))
+        if (! proc.loadScala (escoita::lerTexto (f), err))
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Scala", err);
         refresh();
     });
@@ -1610,7 +1596,7 @@ void TuneEditor::paintCanvas (juce::Graphics& g)
             }
             g.setColour (col::crema2);
             const auto f = caps (8.0f, 0.2f);
-            const float tw = juce::GlyphArrangement::getStringWidth (f, upper (t));
+            const float tw = juce::GlyphArrangement::getStringWidth (f, maiusculas (t));
             drawCaps (g, t, juce::Rectangle<float> (x + 18.0f, y, tw + 4.0f, 14.0f), juce::Justification::centredLeft, 8.0f, 0.2f);
             x += 18.0f + tw + 22.0f;
         };

@@ -2,6 +2,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <escoita_nucleo/escoita_nucleo.h>
 #include <array>
 #include <atomic>
 #include "tune/Engine.h"
@@ -189,11 +190,6 @@ public:
     // desde a tónica) e a afinación Personalizada cos cents de cada unha. Escalas de ata 12
     // graos por oitava; se dous graos caen na mesma nota, erro.
     bool loadScala (const juce::String& text, juce::String& error);
-    // texto que vén de fóra (estado do DAW, presets, .scl) sen risco: só se acepta UTF-8
-    // válido; se non o é, lese coma Latin-1 (moitos .scl de Windows veñen así). JUCE dá por
-    // bo calquera UTF-8, e unha secuencia cortada ao final facía ler fóra do texto.
-    static juce::String textFromBytes (const void* data, size_t size);
-    static juce::String readTextFile (const juce::File& file);
     // MTS-ESP: ¿hai un mestre?, e o nome da súa escala
     bool mtsConnected() const;
     juce::String mtsScaleName() const;

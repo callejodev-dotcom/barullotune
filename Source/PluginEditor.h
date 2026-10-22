@@ -1,7 +1,7 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
-#include "Actualizacions.h"
+#include <escoita_nucleo/escoita_nucleo.h>
 
 namespace ui
 {
@@ -30,7 +30,7 @@ namespace ui
     juce::Font cond (float size);    // Montserrat Bold: a nota, títulos
     // Montserrat en maiúsculas espaciadas (os rótulos, coma na web de Escoita)
     juce::Font caps (float size, float tracking = 0.18f);
-    juce::String upper (const juce::String&);   // maiúsculas, tamén con acentos
+    using escoita::maiusculas;                   // maiúsculas, tamén con acentos (do núcleo)
     void drawCaps (juce::Graphics&, const juce::String&, juce::Rectangle<float>, juce::Justification, float size, float tracking = 0.18f);
 
     struct Look : juce::LookAndFeel_V4
@@ -246,7 +246,7 @@ private:
     juce::TextButton detect, scl, modeBtn[3];
     std::unique_ptr<juce::FileChooser> chooser;
     juce::String lastPresetList;
-    juce::SharedResourcePointer<actualizacions::Checker> updates;
+    juce::SharedResourcePointer<escoita::Actualizacions> updates;
     UpdateButton updateBtn;
     void refreshUpdate();
     // os grupos de mandos de cada pestana (o rótulo e o seu ancho), para debuxalos

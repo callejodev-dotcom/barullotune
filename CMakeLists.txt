@@ -24,6 +24,21 @@ else()
   FetchContent_MakeAvailable(JUCE)
 endif()
 
+# Núcleo común de Escoita: a versión fixada ou, se existe, a carpeta irmá ../escoita-nucleo
+# (para traballar no núcleo e probalo nos plugins á vez); tamén -DESCOITA_NUCLEO=<carpeta>
+set(ESCOITA_NUCLEO_VERSION "v0.1.0")
+if(NOT ESCOITA_NUCLEO AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../escoita-nucleo/escoita_nucleo")
+  set(ESCOITA_NUCLEO "${CMAKE_CURRENT_SOURCE_DIR}/../escoita-nucleo")
+endif()
+if(ESCOITA_NUCLEO)
+  add_subdirectory("${ESCOITA_NUCLEO}" escoita-nucleo)
+else()
+  include(FetchContent)
+  FetchContent_Declare(escoita_nucleo GIT_REPOSITORY https://github.com/callejodev-dotcom/escoita-nucleo.git
+                       GIT_TAG ${ESCOITA_NUCLEO_VERSION} GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(escoita_nucleo)
+endif()
+
 # Formatos por sistema: Mac → AU, VST3 y app; Windows → VST3 y app; Linux → VST3, LV2 y app
 if(APPLE)
   set(FORMATS AU VST3 Standalone)
@@ -86,7 +101,6 @@ juce_add_binary_data(BTFonts SOURCES
 target_sources(BarulloTune PRIVATE
   Source/PluginProcessor.cpp
   Source/PluginEditor.cpp
-  Source/Actualizacions.cpp
   third_party/mts-esp/libMTSClient.cpp)
 
 target_include_directories(BarulloTune PRIVATE Source third_party/mts-esp)
@@ -118,10 +132,11 @@ target_link_libraries(BarulloTune
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
+escoita_produto(BarulloTune NOME "Barullo Tune" VERSION ${PROJECT_VERSION} REPO callejodev-dotcom/barullotune)
 
 # Avisos como erros no código propio (non no de JUCE)
 option(BARULLO_WERROR "Avisos como errores en Source/ y tools/" OFF)
-set(BARULLO_OWN_SOURCES Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/Actualizacions.cpp tools/RenderTest.cpp)
+set(BARULLO_OWN_SOURCES Source/PluginProcessor.cpp Source/PluginEditor.cpp tools/RenderTest.cpp)
 if(BARULLO_WERROR)
   if(MSVC)
     set_source_files_properties(${BARULLO_OWN_SOURCES} PROPERTIES COMPILE_OPTIONS "/WX")
@@ -137,7 +152,7 @@ option(BARULLO_SANITIZE "Compilar la prueba con AddressSanitizer y UBSan" OFF)
 option(BARULLO_TESTS "Compilar la prueba de render" OFF)
 if(BARULLO_TESTS)
   juce_add_console_app(BTRenderTest PRODUCT_NAME "BTRenderTest")
-  target_sources(BTRenderTest PRIVATE tools/RenderTest.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/Actualizacions.cpp third_party/mts-esp/libMTSClient.cpp)
+  target_sources(BTRenderTest PRIVATE tools/RenderTest.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp third_party/mts-esp/libMTSClient.cpp)
   target_include_directories(BTRenderTest PRIVATE Source third_party/mts-esp)
   target_link_libraries(BTRenderTest PRIVATE ${CMAKE_DL_LIBS})
   if(MSVC)
@@ -149,6 +164,7 @@ if(BARULLO_TESTS)
   target_compile_definitions(BTRenderTest PRIVATE BARULLO_VERSION="${PROJECT_VERSION}" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BARULLO_NO_PLUGIN_ENTRY=1)
   target_link_libraries(BTRenderTest PRIVATE BTFonts juce::juce_audio_utils juce::juce_audio_processors juce::juce_audio_formats juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+  escoita_produto(BTRenderTest NOME "Barullo Tune" VERSION ${PROJECT_VERSION} REPO callejodev-dotcom/barullotune PROBA)
   if(BARULLO_SANITIZE AND NOT MSVC)
     target_compile_options(BTRenderTest PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
     target_link_options(BTRenderTest PRIVATE -fsanitize=address,undefined)
@@ -156,7 +172,7 @@ if(BARULLO_TESTS)
 
   # Proba do detector en condicións difíciles (só o motor, sen JUCE)
   add_executable(BTDetectorTest tools/DetectorTest.cpp)
-  target_include_directories(BTDetectorTest PRIVATE Source)
+  target_include_directories(BTDetectorTest PRIVATE Source "${ESCOITA_NUCLEO_DIR}/probas")
   set_target_properties(BTDetectorTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/BTDetectorTest_artefacts/$<CONFIG>")
   if(MSVC)
     target_compile_options(BTDetectorTest PRIVATE /utf-8 /O2)

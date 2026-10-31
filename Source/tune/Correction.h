@@ -88,6 +88,7 @@ struct CorrState
     // detector de vibrato: só se respecta unha oscilación regular (4–8 Hz, varios ciclos)
     double clock = 0, lastZc = -1e9, lastHalf = 0, vibEnv = 0, vibConf = 0; int vibSign = 0;
     double noteAge = 0;   // mostras desde que empezou a nota (para humanizar e o vibrato xerado)
+    double mFast = 0, snap = 0;   // o ton dos últimos 2 ms (para ver os saltos do detector) e mostras sen transición
     // vibrato xerado: fase, variación lenta (ruído filtrado) e a modulación de nivel que sae
     double genPhase = 0, genRateVar = 0, genDepthVar = 0, genRateGoal = 0, genDepthGoal = 0, genClock = 0;
     uint32_t rng = 0x9E3779B9u;
@@ -120,6 +121,7 @@ public:
             st.prevCentre = m; st.slope = 0;
             st.clock = 0; st.lastZc = -1e9; st.lastHalf = 0; st.vibEnv = 0; st.vibConf = 0; st.vibSign = 0;
             st.noteAge = 0;
+            st.mFast = m; st.snap = 0;
             const double err = st.tS - m;
             st.cS = forced ? err : (free || std::abs (err) * 100.0 < set.tolCents) ? 0.0 : err * set.amount * flexFactor (err);
             st.lastTarget = tgt;
@@ -128,10 +130,20 @@ public:
             outMidi = m + st.cS + transpose + bend;
             return st.cS + transpose + bend;
         }
+        // un salto grande do ton en poucos ms non é a voz movéndose: é o detector cambiando
+        // de período (unha oitava, un harmónico) ou unha nota que entra de golpe. Alí non hai
+        // transición que facer: durante 10 ms (mentres o ton e a decisión se asentan) a nota
+        // de destino vai directa, e o filtro do vibrato e a pendente móvense co salto. Se non,
+        // a transición levaba a saída ata a nota de antes e volvía (nunha voz real con dúbidas
+        // de oitava e de harmónico, Do4 saía ata 6 semitonos fóra durante 100 ms)
+        const double leap = m - st.mFast;
+        st.mFast += leap * alphaFor (2.0, dt);
+        if (std::abs (leap) > 2.5) { st.snap = 0.010 * sr; st.ic2 += leap; st.prevCentre += leap; st.mFast = m; }
         if (tgt != st.lastTarget) { st.vibRamp = 0; st.noteAge = 0; }   // nota nova: o vibrato volve entrar amodo
         st.noteAge += dt;
         st.lastTarget = tgt;
-        st.tS += (set.pitchOf (tgt) - st.tS) * alphaFor (set.transitionMs, dt);
+        if (st.snap > 0.0) { st.snap -= dt; st.tS = set.pitchOf (tgt); }
+        else st.tS += (set.pitchOf (tgt) - st.tS) * alphaFor (set.transitionMs, dt);
         st.vibRamp = std::min (1.0, st.vibRamp + dt / (0.10 * sr));
         const double band = clampd (vibratoBand (st, m, dt), -1.5, 1.5);
         updateVibratoConfidence (st, band, dt);
@@ -154,7 +166,12 @@ public:
             st.tolTimer = outside ? st.tolTimer + dt : 0.0;
             if (outside && st.tolTimer >= set.tolMs * 0.001 * sr) want = err * set.amount * (1.0 - relax) * flexFactor (err);
         }
-        st.cS += (want - st.cS) * alphaFor (forced ? set.speedMs : speedFor (st), dt);
+        // a nota de destino decídese cada 4 ms: xusto despois do salto aínda é a de antes, e a
+        // corrección iría cara a ela co ton novo (un salto dunha duodécima levaba a saída 3
+        // semitonos arriba durante 20 ms). Mentres a nota de destino está lonxe do ton novo, a
+        // corrección queda como estaba
+        const bool stale = ! forced && st.snap > 0.0 && std::abs (err) > 1.5;
+        if (! stale) st.cS += (want - st.cS) * alphaFor (forced ? set.speedMs : speedFor (st), dt);
         outMidi = centre + st.cS + set.vibrato * vib + transpose + bend + generatedVibrato (st, dt);
         return outMidi - m;
     }

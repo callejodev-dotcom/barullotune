@@ -95,6 +95,7 @@ private:
             }
         int best = -1;
         const double pt = voiced ? period / decim : 0.0;
+        if (! voiced) steady = 0;
         // continuidade: se xa había voz, mira primeiro arredor do período anterior (±15 %)
         // para non saltar de oitava no medio dunha nota. Pero se a voz cambiou de nota
         // (o val de agora está lonxe e é claramente máis fondo), o de arredor é un val
@@ -112,8 +113,14 @@ private:
             const bool globalClearlyBetter = ! globalIsMultiple && global >= 0 && (global < lo || global > hi) && d[(size_t) global] < d[(size_t) std::max (bl, 0)] - 0.1;
             if (bl >= 0 && d[(size_t) bl] < (globalIsMultiple ? 0.45 : threshold + 0.12) && ! globalClearlyBetter) best = bl;
             // e ao revés: se o primeiro val claro está a un terzo (ou menos) do que se segue,
-            // o que se segue é un múltiplo, non a nota (un período común que quedou enganchado)
-            if (best >= 0 && global > 0 && std::lround ((double) best / global) >= 3 && multipleOf ((double) best, (double) global)) best = global;
+            // o que se segue é un múltiplo, non a nota (un período común que quedou enganchado).
+            // Pero non se a nota que se segue leva un anaco firme e o seu val é claramente máis
+            // fondo: entón o val curto é un harmónico (unha vogal co formante no terceiro: a voz
+            // saía unha duodécima arriba durante un cuarto de segundo). Nun glisando rápido o val
+            // longo vaise facendo menos fondo (0,03–0,07) pero segue gañando ao curto por 0,03–0,09:
+            // pedíndolle menos de 0,05 e 0,05 de diferenza, a nota saltaba ao harmónico a medio glisando
+            const bool firmNote = steady >= steadyMin && d[(size_t) best] < threshold && d[(size_t) global] > d[(size_t) best] + 0.025;
+            if (best >= 0 && global > 0 && ! firmNote && std::lround ((double) best / global) >= 3 && multipleOf ((double) best, (double) global)) best = global;
         }
         const bool following = best >= 0;
         bool combed = false, weak = false;
@@ -197,6 +204,7 @@ private:
         // abaixo (o val ao dobre do período é sempre case tan fondo coma o verdadeiro). E,
         // como se mira en cada lectura, un erro solto non queda enganchado pola continuidade.
         if (best > 0 && ! common && ! combed) best = following ? octaveSwitch (best) : octaveFamily (best);
+        if (best > 0 && ! common && ! combed) best = oddHarmonicOf (best);
         double tau = best;
         if (combed) tau = combPeriod (best);
         else if (best > 1 && best < tauMax)
@@ -221,6 +229,8 @@ private:
             pending = p;
             return;
         }
+        // canto leva a nota firme: seguida, sen cambiar de período (a cada lectura, ~4 ms)
+        steady = following && std::abs (std::log2 (p / period)) < 0.03 ? steady + 1 : 0;
         period = p;
         misses = 0;
     }
@@ -245,6 +255,41 @@ private:
             // máis curto gaña os empates, coma no YIN; con ruído o dobre e o verdadeiro empatan)
             const double there = fracDepth (at);
             if (at > lo && at < hi && (mlt > 1.0 ? there < 0.5 * here - 0.01 : there <= here)) return at;
+        }
+        return best;
+    }
+
+    // Un harmónico impar: unha vogal co primeiro formante no terceiro ou no quinto harmónico
+    // (o fundamental 20 dB por baixo) é case periódica a un terzo ou a un quinto do período,
+    // e a familia da oitava (a metade, o dobre) non o ve. Se o val ao múltiplo k é moito
+    // máis fondo ca o de agora e ca os múltiplos de antes (dun período de verdade, todos os
+    // seus múltiplos son case tan fondos coma el), o período é ese. Nunha voz real de
+    // barítono co formante arredor de 680 Hz, 13 s de 3:40 saían unha duodécima ou dúas
+    // oitavas e unha terceira arriba
+    int oddHarmonicOf (int best) const
+    {
+        // (mentres soa a cola da nota anterior non: alí un múltiplo pode ser o período común)
+        if (commonFrom > 0.0) return best;
+        auto valNear = [this] (int c) { int at = c - 2; for (int k = c - 2; k <= c + 2; ++k) if (d[(size_t) k] < d[(size_t) at]) at = k; return at; };
+        // os fondos no atraso fraccionario: nun período curto o val cae entre dúas mostras e
+        // o dun múltiplo, máis preto dunha enteira, parecería máis fondo sen selo
+        const double here = fracDepth (best);
+        // un val curto xa moi fondo é o período de verdade
+        if (here <= 0.03) return best;
+        for (int k : { 3, 5 })
+        {
+            if (k * best + 3 >= tauMax) break;
+            const int tk = valNear (k * best);
+            const double dk = fracDepth (tk);
+            if (dk >= 0.25 * here) continue;
+            bool ok = true;
+            for (int j = 2; j < k && ok; ++j) ok = dk < 0.5 * fracDepth (valNear (j * best));
+            // e entre os dous non hai outro val tan fondo coma o de agora (outra nota soando á
+            // vez, cun período común: na reverberación, dunha cuarta, 3·vella = 4·nova)
+            for (int t = (int) std::lround (1.2 * best); ok && t <= (int) std::lround ((k - 0.2) * best); ++t)
+                if (d[(size_t) t] < here - 0.02 && d[(size_t) t] <= d[(size_t) t - 1] && d[(size_t) t] <= d[(size_t) t + 1]
+                    && std::abs ((double) t / best - std::round ((double) t / best)) > 0.1) ok = false;
+            if (ok) return tk;
         }
         return best;
     }
@@ -434,6 +479,8 @@ private:
     double anchor = 0;                 // período (diezmado) da última lectura clara
     int holds = 0;
     static constexpr int maxHolds = 6; // ~24 ms
+    int steady = 0;                    // lecturas seguidas na mesma nota
+    static constexpr int steadyMin = 8;  // ~35 ms
     double commonFrom = 0;             // seguindo un período común: a nota de antes
     int commonAge = 0;
 };

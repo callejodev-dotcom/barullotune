@@ -119,7 +119,7 @@ private:
             // saía unha duodécima arriba durante un cuarto de segundo). Nun glisando rápido o val
             // longo vaise facendo menos fondo (0,03–0,07) pero segue gañando ao curto por 0,03–0,09:
             // pedíndolle menos de 0,05 e 0,05 de diferenza, a nota saltaba ao harmónico a medio glisando
-            const bool firmNote = steady >= steadyMin && d[(size_t) best] < threshold && d[(size_t) global] > d[(size_t) best] + 0.025;
+            const bool firmNote = best >= 0 && global > 0 && steady >= steadyMin && d[(size_t) best] < threshold && d[(size_t) global] > d[(size_t) best] + 0.025;
             if (best >= 0 && global > 0 && ! firmNote && std::lround ((double) best / global) >= 3 && multipleOf ((double) best, (double) global)) best = global;
         }
         const bool following = best >= 0;

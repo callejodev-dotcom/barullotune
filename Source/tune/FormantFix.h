@@ -100,6 +100,7 @@ public:
     void advance() { if (step < hop) ++step; }
 
     int frame = 1024, hop = 128, order = 20;
+    double preEmph = 0.9;
     double amount = 0.0;   // 0 = sen corrección, 1 = corrección completa (para fundir)
     bool ready = false;
     std::vector<float> xf;  // marco de traballo (a orixinal, lida fóra)
@@ -110,7 +111,10 @@ private:
     {
         double r[maxOrder + 1];
         double* w = wf.data();
-        for (int i = 0; i < frame; ++i) w[i] = (double) x[i] * win[(size_t) i];   // a xanela, unha soa vez
+        // con preénfase: sen ela a predición só segue a parte grave (a de máis enerxía) e os
+        // agudos quedaban sen corrixir (≈ +1 dB por riba de 4 kHz ao subir un semitono). Como
+        // as dúas envolventes (orixinal e lida) levan a mesma, cancélase no filtro
+        for (int i = 0; i < frame; ++i) w[i] = ((double) x[i] - preEmph * (double) x[i > 0 ? i - 1 : 0]) * win[(size_t) i];
         for (int lag = 0; lag <= order; ++lag)
         {
             double acc = 0;

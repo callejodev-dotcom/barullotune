@@ -30,6 +30,8 @@ public:
         // ao subir unha oitava
         xfGuard = (int) std::ceil (1.1 * xfade);
         ffix.prepare (sr);
+        for (auto& f : colourLo) { f.lowpass (3200.0, sr, 0.5); f.reset(); }
+        colourAlpha = 1.0 - std::exp (-1.0 / (0.01 * sr));
         ffixAlpha = 1.0 - std::exp (-1.0 / (0.02 * sr));
         ffixAlphaFast = 1.0 - std::exp (-1.0 / (0.005 * sr));
         envAlpha = 1.0 - std::exp (-1.0 / (0.003 * sr));
@@ -54,6 +56,7 @@ public:
     {
         ffix.reset();
         envIn[0] = envIn[1] = envOut[0] = envOut[1] = 0;
+        colourDb = 0; for (auto& f : colourLo) f.reset();
         decider.reset(); decCount = 0;
         rp = (double) n - (double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; state = {};
         gate = 0;
@@ -174,6 +177,23 @@ public:
         }
         // trémolo do vibrato xerado
         if (sounding && state.active) for (int c = 0; c < nch; ++c) y[c] = (float) (y[c] * state.ampMod);
+        // cor: os agudos (estante desde ~3 kHz) baixan un pouco nas consoantes e máis canto
+        // máis se corrixe, coma no Waves Tune RT (medido cunha toma real: −1,9 dB sen ton,
+        // −0,3 dB nas notas case afinadas e −1,7 dB nas moi corrixidas). Non é un EQ fixo: segue
+        // a corrección e as consoantes mostra a mostra
+        {
+            const double amount = std::min (1.0, std::abs (dirCorr - transpose) / 0.5);
+            // só ao afinar: ao transpor ou mover os formantes (efectos, armonías) a voz queda coa súa cor
+            const bool effect = std::abs (transpose + offset) >= 0.99 || std::abs (formant) >= 0.05;
+            const double wantDb = effect ? 0.0 : voiced ? -0.3 - 1.4 * amount : -1.9;
+            colourDb += (wantDb - colourDb) * colourAlpha;
+            const double g = std::pow (10.0, colourDb / 20.0) - 1.0;
+            for (int c = 0; c < nch; ++c)
+            {
+                const double low = colourLo[c].process ((double) y[c]);
+                y[c] = (float) (y[c] + g * ((double) y[c] - low));
+            }
+        }
         // unha armonía só soa cando hai voz e nota (sen ton, as consoantes dobradas emborranan)
         if (role.harmony)
         {
@@ -256,6 +276,8 @@ private:
     double sr = 48000;
     double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, dirAlphaUnvoiced = 0.01, lookAhead = 0, ffixAlpha = 0.001, ffixAlphaFast = 0.004, envAlpha = 0.007;
     double envIn[2] {}, envOut[2] {};
+    Biquad colourLo[2];
+    double colourDb = 0, colourAlpha = 0.001;
     int xfade = 36, xfGuard = 32, dMin = 12, dLead = 12;
     int xfPos = -1, xfLen = 36;
     double score[maxSearch] {};

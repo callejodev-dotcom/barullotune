@@ -56,7 +56,7 @@ public:
     {
         ffix.reset();
         envIn[0] = envIn[1] = envOut[0] = envOut[1] = 0;
-        colourDb = 0; for (auto& f : colourLo) f.reset();
+        colourDb = 0; fixStrength = 0; for (auto& f : colourLo) f.reset();
         decider.reset(); decCount = 0;
         rp = (double) n - (double) dLead; rp2 = 0; xfPos = -1; dirCorr = 0; rho = 1.0; state = {};
         gate = 0;
@@ -147,7 +147,12 @@ public:
         // Tamén ao corrixir: unha voz que vai un semitono baixa e se sube enteira levaba os
         // formantes un 6 % arriba e as vogais cambiaban de cor (oíase en directo, sobre todo
         // entre vogais). Mentres corrixe unha nota devólvese o timbre, coma ao transpor.
-        const bool want = voiced && (sounding || std::abs (transpose + offset) >= 0.99 || std::abs (formant) >= 0.05);
+        const bool effect = std::abs (transpose + offset) >= 0.99 || std::abs (formant) >= 0.05;   // transpor ou formantes (efecto), non só afinar
+        const bool want = voiced && (sounding || effect);
+        // ao afinar, a corrección dos formantes en proporción ao que se move a voz (enteira desde
+        // un semitono): o filtro tamén cambia a forma da onda, e nas correccións pequenas, onde os
+        // formantes case non se moven, facía máis mal ca ben (vogais con resonancias que van e veñen)
+        fixStrength += ((effect ? 1.0 : std::min (1.0, std::abs (dirCorr - transpose))) - fixStrength) * colourAlpha;
         ffix.amount += ((want ? 1.0 : 0.0) - ffix.amount) * (want ? ffixAlpha : ffixAlphaFast);
         if (ffix.amount < 1e-4 && ! want) { if (ffix.ready) ffix.reset(); }
         else
@@ -167,11 +172,15 @@ public:
             for (int c = 0; c < nch; ++c)
             {
                 double fixed = ffix.process (c, y[c]);
-                // seguridade: a corrección non pode deixar a voz máis do dobre de forte (3 ms)
+                // seguridade: a corrección non pode deixar a voz máis forte do que entra (+2 dB, 3 ms).
+                // Ao afinar, ao comezo dunha vogal as dúas envolventes eran de sons distintos e o
+                // filtro resoaba: ráfagas de ata +8 dB (o «que raras soan as vogais»). Ao transpor,
+                // coma antes (o dobre)
                 envIn[c] += ((double) y[c] * y[c] - envIn[c]) * envAlpha;
                 envOut[c] += (fixed * fixed - envOut[c]) * envAlpha;
-                if (envOut[c] > 4.0 * envIn[c] + 1e-12) fixed *= std::sqrt ((4.0 * envIn[c] + 1e-12) / envOut[c]);
-                y[c] = (float) (y[c] + (fixed - y[c]) * ffix.amount);
+                const double cap = effect ? 4.0 : 1.6;
+                if (envOut[c] > cap * envIn[c] + 1e-12) fixed *= std::sqrt ((cap * envIn[c] + 1e-12) / envOut[c]);
+                y[c] = (float) (y[c] + (fixed - y[c]) * ffix.amount * fixStrength);
             }
             ffix.advance();
         }
@@ -184,7 +193,6 @@ public:
         {
             const double amount = std::min (1.0, std::abs (dirCorr - transpose) / 0.5);
             // só ao afinar: ao transpor ou mover os formantes (efectos, armonías) a voz queda coa súa cor
-            const bool effect = std::abs (transpose + offset) >= 0.99 || std::abs (formant) >= 0.05;
             const double wantDb = effect ? 0.0 : voiced ? -0.3 - 1.4 * amount : -1.9;
             colourDb += (wantDb - colourDb) * colourAlpha;
             const double g = std::pow (10.0, colourDb / 20.0) - 1.0;
@@ -277,7 +285,7 @@ private:
     double rp = 0, rp2 = 0, dirCorr = 0, rho = 1.0, dirAlpha = 0.01, dirAlphaUnvoiced = 0.01, lookAhead = 0, ffixAlpha = 0.001, ffixAlphaFast = 0.004, envAlpha = 0.007;
     double envIn[2] {}, envOut[2] {};
     Biquad colourLo[2];
-    double colourDb = 0, colourAlpha = 0.001;
+    double colourDb = 0, colourAlpha = 0.001, fixStrength = 0;
     int xfade = 36, xfGuard = 32, dMin = 12, dLead = 12;
     int xfPos = -1, xfLen = 36;
     double score[maxSearch] {};

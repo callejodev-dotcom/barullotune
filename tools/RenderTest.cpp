@@ -249,7 +249,8 @@ static void snapshot (const juce::File& png, int tab)
     std::printf ("PNG: %s\n", png.getFullPathName().toRawUTF8());
 }
 
-// procesa un ficheiro: BTRenderTest --file entrada.wav saida.wav [parámetro=valor ...]
+// procesa un ficheiro: BTRenderTest --file entrada.wav saida.wav [parámetro=valor ...] [midi=notas.txt]
+// (notas.txt: unha liña por evento, «mostra nota» co número negativo para soltala)
 static int processFile (int argc, char** argv)
 {
     juce::AudioFormatManager fm; fm.registerBasicFormats();
@@ -261,11 +262,20 @@ static int processFile (int argc, char** argv)
     rd->read (&src, 0, len, 0, true, true);
     TuneProcessor p;
     p.setPlayConfigDetails (1, 1, sr, 512);
+    std::vector<std::pair<int, int>> ev;
     for (int a = 4; a < argc; ++a)
     {
-        const juce::String kv (argv[a]);
-        setP (p, kv.upToFirstOccurrenceOf ("=", false, false).toRawUTF8(), kv.fromFirstOccurrenceOf ("=", false, false).getFloatValue());
+        const juce::String kv (argv[a]), key = kv.upToFirstOccurrenceOf ("=", false, false), val = kv.fromFirstOccurrenceOf ("=", false, false);
+        if (key == "midi")
+        {
+            juce::StringArray lines; lines.addLines (juce::File (val).loadFileAsString());
+            for (auto& l : lines) { auto t = juce::StringArray::fromTokens (l, false); if (t.size() >= 2) ev.push_back ({ t[0].getIntValue(), t[1].getIntValue() }); }
+            std::stable_sort (ev.begin(), ev.end(), [] (const auto& x, const auto& y) { return x.first < y.first; });
+            continue;
+        }
+        setP (p, key.toRawUTF8(), val.getFloatValue());
     }
+    size_t k = 0;
     p.prepareToPlay (sr, 512);
     const int lat = p.realLatencySamples(), total = len + lat;
     juce::AudioBuffer<float> out (1, len), buf (1, 512);
@@ -279,7 +289,14 @@ static int processFile (int argc, char** argv)
             if (pos + i < len) { for (int c = 0; c < src.getNumChannels(); ++c) x += src.getSample (c, pos + i); x /= (float) src.getNumChannels(); }
             buf.setSample (0, i, x);
         }
-        juce::MidiBuffer m; p.processBlock (buf, m);
+        juce::MidiBuffer m;
+        while (k < ev.size() && ev[k].first < pos + n)
+        {
+            const int at = juce::jmax (0, ev[k].first - pos), note = ev[k].second;
+            m.addEvent (note > 0 ? juce::MidiMessage::noteOn (1, note, (juce::uint8) 100) : juce::MidiMessage::noteOff (1, -note), at);
+            ++k;
+        }
+        p.processBlock (buf, m);
         for (int i = 0; i < n; ++i) if (pos + i - lat >= 0 && pos + i - lat < len) out.setSample (0, pos + i - lat, buf.getSample (0, i));
     }
     const juce::File f { juce::String (argv[3]) };

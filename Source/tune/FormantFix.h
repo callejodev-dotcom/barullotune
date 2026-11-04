@@ -90,11 +90,14 @@ public:
             bI[m] = bI[m - 1] + k * e;
         }
         bI[0] = e;
-        if (c == 0 && step < hop) ++step;
         const double g = g0 + (g1 - g0) * t;
         const double out = e * g;
         return std::isfinite (out) ? (float) out : 0.0f;
     }
+
+    // a seguinte mostra: unha vez por mostra, despois de todas as canles (antes avanzaba despois
+    // da primeira e a segunda ía unha mostra por diante na interpolación: estéreo ≠ mono)
+    void advance() { if (step < hop) ++step; }
 
     int frame = 1024, hop = 128, order = 20;
     double amount = 0.0;   // 0 = sen corrección, 1 = corrección completa (para fundir)

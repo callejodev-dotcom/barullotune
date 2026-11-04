@@ -141,7 +141,10 @@ public:
         // Sen ton (consoantes, respiracións) lese a velocidade 1 e non hai nada que corrixir:
         // apágase en 5 ms (na fronteira entre unha vogal e unha «s», as dúas envolventes son
         // de sons distintos e unha resonancia aguda disparábase uns 10 ms)
-        const bool want = voiced && (std::abs (transpose + offset) >= 0.99 || std::abs (formant) >= 0.05);
+        // Tamén ao corrixir: unha voz que vai un semitono baixa e se sube enteira levaba os
+        // formantes un 6 % arriba e as vogais cambiaban de cor (oíase en directo, sobre todo
+        // entre vogais). Mentres corrixe unha nota devólvese o timbre, coma ao transpor.
+        const bool want = voiced && (sounding || std::abs (transpose + offset) >= 0.99 || std::abs (formant) >= 0.05);
         ffix.amount += ((want ? 1.0 : 0.0) - ffix.amount) * (want ? ffixAlpha : ffixAlphaFast);
         if (ffix.amount < 1e-4 && ! want) { if (ffix.ready) ffix.reset(); }
         else
@@ -167,6 +170,7 @@ public:
                 if (envOut[c] > 4.0 * envIn[c] + 1e-12) fixed *= std::sqrt ((4.0 * envIn[c] + 1e-12) / envOut[c]);
                 y[c] = (float) (y[c] + (fixed - y[c]) * ffix.amount);
             }
+            ffix.advance();
         }
         // trémolo do vibrato xerado
         if (sounding && state.active) for (int c = 0; c < nch; ++c) y[c] = (float) (y[c] * state.ampMod);

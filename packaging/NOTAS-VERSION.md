@@ -2,6 +2,14 @@
 
 Unha ferramenta de [Escoita](https://www.escoita.link). Manual: [docs/MANUAL.md](https://github.com/callejodev-dotcom/barullotune/blob/main/docs/MANUAL.md).
 
+## Novidades na 0.4.1
+
+- **As vogais xa non cambian de cor ao afinar** (Directo e Preciso): o timbre da voz (os formantes) corríxese tamén mentres se leva unha nota á súa altura, non só ao transpor; en proporción a canto se corrixe (enteiro dende un semitono) e sen ráfagas nos ataques. Antes, nas correccións grandes (unha subida arrastrada, por exemplo) a vogal soaba rara.
+- **Cor coma un afinador de estudio ao corrixir**: os agudos baixan un pouco nas consoantes e canto máis se corrixe; apagado ao transpor.
+- **Análise dos formantes con preénfase**: a envolvente segue tamén os agudos (antes quedaba ata 1 dB baixa entre 0,5 e 2 kHz ao transpor).
+- **MIDI: escala** só obedece a nota de MIDI se a voz anda a menos de 2 semitonos dela; se non, a escala. Cunha guía MIDI da melodía, xa non leva a voz dun golpe á nota cando aínda vés de abaixo. **MIDI: nota** segue igual (sempre a tecla).
+- Corrixido: o paso estéreo da corrección de formantes.
+
 ## Novidades na 0.4.0
 
 - **Edición, nota a nota** (pestana nova): acende **Capturar** e toca a toma no DAW; a voz aparece sobre a liña de tempo, partida en notas. Arrastra cada nota a onde queiras (con Alt, en cents) e, ao volver tocar, vai alí; as outras corríxense en directo, coma sempre. Sen ARA: vale en calquera DAW, tamén en Ableton. Vai co proxecto e todo se pode desfacer. «Capturar» é tamén un parámetro do DAW e, ao abrir un proxecto, vai sempre apagado.

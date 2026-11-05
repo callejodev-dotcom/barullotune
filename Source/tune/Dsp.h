@@ -15,6 +15,7 @@ struct Biquad
     double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
     void lowpass (double fc, double sr, double q = 0.7071)
     {
+        fc = fc < 0.45 * sr ? fc : 0.45 * sr;   // por riba de Nyquist o filtro non é estable (clap-validator proba a 1234 Hz)
         const double w = 2.0 * kPi * fc / sr, c = std::cos (w), al = std::sin (w) / (2.0 * q), a0 = 1.0 + al;
         b0 = (1.0 - c) * 0.5 / a0; b1 = (1.0 - c) / a0; b2 = b0; a1 = -2.0 * c / a0; a2 = (1.0 - al) / a0;
     }

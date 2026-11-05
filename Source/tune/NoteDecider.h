@@ -50,11 +50,11 @@ private:
 };
 
 // ¿pódese ir a esta nota? (escala, notas libres ou as teclas MIDI)
-inline bool noteAllowed (const Settings& set, const MidiState& midi, int note)
+inline bool noteAllowed (const Settings& set, const MidiState& midi, int note, bool useMidi = true)
 {
     if (set.useNoteCents && note >= 0 && note < 128 && set.noteBlocked[note]) return false;
     const int pc = ((note % 12) + 12) % 12;
-    if ((set.mode == Settings::MidiScale || set.mode == Settings::MidiNote) && midi.heldMask != 0) return (midi.heldMask >> pc) & 1;
+    if (useMidi && (set.mode == Settings::MidiScale || set.mode == Settings::MidiNote) && midi.heldMask != 0) return (midi.heldMask >> pc) & 1;
     const int deg = ((pc - set.key) % 12 + 12) % 12;
     return ((set.scale | set.freeMask) >> deg) & 1;
 }
@@ -145,8 +145,20 @@ public:
         if (was) decSlope += ((md - prevMd) / (dt / sr) - decSlope) * (1.0 - std::exp (-dt / (0.0112 * sr)));   // semitonos/s
 
         int t = target;
+        // MIDI escala: só se a voz anda preto (como moito a «captura» dunha tecla). Máis lonxe, a voz
+        // vai cara a outra nota ou chega arrastrando (a guía xa está na nota e ti aínda vés de
+        // abaixo): forzala subía ata 4 semitonos de golpe e a vogal saía de pitufo. Aí, a escala.
+        // É o modo para unha guía coa melodía (a do disco); MIDI nota, para tocar a nota no teclado
+        bool useMidi = midi.heldMask != 0 && (set.mode == Settings::MidiScale || set.mode == Settings::MidiNote);
+        if (useMidi && set.mode == Settings::MidiScale)   // MIDI nota segue o teclado sempre (efectos, armonías)
+        {
+            double near = 1e9;
+            for (int pc = 0; pc < 12; ++pc)
+                if ((midi.heldMask >> pc) & 1) { double d = std::fmod (std::abs (md - pc), 12.0); near = std::min (near, std::min (d, 12.0 - d)); }
+            useMidi = near <= midiCapture;
+        }
         if (set.forcedNote >= 0) t = set.forcedNote;   // edición: a nota editada á man
-        else if (set.mode == Settings::MidiNote && midi.lastNote >= 0)
+        else if (useMidi && set.mode == Settings::MidiNote && midi.lastNote >= 0)
         {
             // nota exacta: a oitava máis próxima á voz
             t = midi.lastNote;
@@ -161,16 +173,16 @@ public:
             int best = -1; double bd = 1e9;
             const int c = (int) std::lround (md);
             for (int k = c - 7; k <= c + 7; ++k)
-                if (noteAllowed (set, midi, k) && std::abs (md - set.pitchOf (k)) < bd) { bd = std::abs (md - set.pitchOf (k)); best = k; }
+                if (noteAllowed (set, midi, k, useMidi) && std::abs (md - set.pitchOf (k)) < bd) { bd = std::abs (md - set.pitchOf (k)); best = k; }
             if (best < 0) best = c;
-            const bool keep = was && t >= 0 && noteAllowed (set, midi, t) && std::abs (md - set.pitchOf (t)) < 0.6;
+            const bool keep = was && t >= 0 && noteAllowed (set, midi, t, useMidi) && std::abs (md - set.pitchOf (t)) < 0.6;
             if (! keep && best != t)
             {
                 if (best != candidate) { candidate = best; candHeld = 0; }
                 candHeld += dt;
                 // se a voz vai claramente cara á nota nova (máis de 5 semitonos/s), acéptase xa
                 const bool movingThere = std::abs (decSlope) > 5.0 && (best - t) * decSlope > 0 && std::abs (md - set.pitchOf (t)) > 0.5;
-                if (! was || t < 0 || ! noteAllowed (set, midi, t) || std::abs (md - set.pitchOf (t)) > 0.9 || movingThere || candHeld >= 0.025 * sr) t = best;
+                if (! was || t < 0 || ! noteAllowed (set, midi, t, useMidi) || std::abs (md - set.pitchOf (t)) > 0.9 || movingThere || candHeld >= 0.025 * sr) t = best;
             }
             else candidate = -1;
         }
@@ -194,6 +206,7 @@ private:
     double mSmooth = 0, candHeld = 0, decSlope = 0, lastM = 0;
     double runStart = 0, runExt = 0;
     int runDir = 0, candidate = -1;
+    static constexpr double midiCapture = 2.0;   // semitonos
 };
 
 } // namespace tune

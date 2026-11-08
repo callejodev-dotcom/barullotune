@@ -51,16 +51,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout TuneProcessor::layout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "modo", 1 }, U ("Modo"), modes, 0, choiceAttrs (modes)));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "tonica", 1 }, U ("Tónica"), keys, 0, choiceAttrs (keys)));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "escala", 1 }, U ("Escala"), sc, 1, choiceAttrs (sc)));
-    for (int i = 0; i < 12; ++i)
-        l.add (std::make_unique<AudioParameterBool> (ParameterID { "nota" + String (i), 1 }, U ("Nota ") + scales::noteName (i), true));
-    for (int i = 0; i < 12; ++i)
-        l.add (std::make_unique<AudioParameterBool> (ParameterID { "libre" + String (i), 1 }, U ("Libre ") + scales::noteName (i), false));
     // afinación: igual (12 semitonos iguais), xusta (respecto da tónica) ou personalizada (cents por nota)
     const StringArray afins { U ("Igual"), U ("Xusta"), U ("Personalizada"), U ("MTS-ESP") };
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "afinacion", 1 }, U ("Afinación"), afins, 0, choiceAttrs (afins)));
-    for (int i = 0; i < 12; ++i)
-        l.add (std::make_unique<AudioParameterFloat> (ParameterID { "cents" + String (i), 1 }, U ("Cents ") + scales::noteName (i), NormalisableRange<float> (-50.0f, 50.0f, 0.01f), 0.0f,
-            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " c"; })));
 
     auto msFmt = AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("0 ms") : String (roundToInt (v)) + " ms"; });
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "velocidade", 1 }, U ("Velocidade"),
@@ -194,7 +187,7 @@ TuneProcessor::TuneProcessor()
     pBendRange = params.getRawParameterValue ("bend_rango");
     pAir = params.getRawParameterValue ("aire");
     pMidiOut = params.getRawParameterValue ("midi_saida");
-    for (int i = 0; i < 12; ++i) pCents[(size_t) i] = params.getRawParameterValue ("cents" + juce::String (i));
+    ponerAxustesNotas ({});
     pHarmMode = params.getRawParameterValue ("armonia_modo");
     for (int h = 0; h < numHarmonies; ++h)
     {
@@ -209,8 +202,6 @@ TuneProcessor::TuneProcessor()
         hp.formant = params.getRawParameterValue (id + "_formantes");
     }
     bypassParam = params.getParameter ("bypass");
-    for (int i = 0; i < 12; ++i) pNota[(size_t) i] = params.getRawParameterValue ("nota" + juce::String (i));
-    for (int i = 0; i < 12; ++i) pLibre[(size_t) i] = params.getRawParameterValue ("libre" + juce::String (i));
     for (auto& h : keyHist) h = 0;
     for (auto& h : chroma) h = 0;
 
@@ -395,7 +386,7 @@ void TuneProcessor::tuningCents (double* c) const
 {
     const int mode = juce::jlimit (0, 3, (int) pAfin->load()), tonic = (int) pTonica->load();
     for (int pc = 0; pc < 12; ++pc)
-        c[pc] = mode == 1 ? scales::justCents (pc - tonic) : mode == 2 ? (double) pCents[(size_t) pc]->load() : 0.0;
+        c[pc] = mode == 1 ? scales::justCents (pc - tonic) : mode == 2 ? (double) centsNota[(size_t) pc].load() : 0.0;
 }
 
 bool TuneProcessor::loadScala (const juce::String& text, juce::String& error)
@@ -438,11 +429,10 @@ bool TuneProcessor::loadScala (const juce::String& text, juce::String& error)
         mask |= (uint16_t) (1u << pc);
         cpc[pc] = juce::jlimit (-50.0, 50.0, c - 100.0 * deg);
     }
-    for (int i = 0; i < 12; ++i)
-    {
-        setParamPlain ("nota" + juce::String (i), ((mask >> i) & 1) ? 1.0f : 0.0f);
-        setParamPlain ("cents" + juce::String (i), (float) cpc[i]);
-    }
+    auto a = axustesNotas();
+    a.notas = mask;
+    for (int i = 0; i < 12; ++i) a.cents[(size_t) i] = (float) cpc[i];
+    cambiarAxustesNotas (a);
     setParamPlain ("escala", (float) scales::custom);
     setParamPlain ("afinacion", 2.0f);
     return true;
@@ -474,6 +464,100 @@ void TuneProcessor::chromaFrame()
     chromaHeard = chromaHeard.load() + dt;
 }
 
+// ---- axustes por nota: estado propio, fóra dos parámetros ----
+namespace
+{
+    const juce::Identifier idNotas { "NOTAS" };
+
+    // ata a versión 2 eran 36 parámetros (nota0.., libre0.., cents0..): sácanse da árbore
+    // (no estado do proxecto o valor vai en «value», nas fotos dos presets en «v»)
+    juce::ValueTree sacarNotasVellas (juce::ValueTree& st, const juce::Identifier& campo)
+    {
+        const auto tirar = [&] (const juce::String& id, double porDefecto)
+        {
+            auto c = st.getChildWithProperty ("id", id);
+            if (! c.isValid()) return porDefecto;
+            const double v = c.getProperty (campo, porDefecto);
+            st.removeChild (c, nullptr);
+            return v;
+        };
+        int notas = 0, libres = 0;
+        juce::ValueTree n (idNotas);
+        for (int i = 0; i < 12; ++i)
+        {
+            if (tirar ("nota" + juce::String (i), 1.0) > 0.5) notas |= 1 << i;
+            if (tirar ("libre" + juce::String (i), 0.0) > 0.5) libres |= 1 << i;
+            n.setProperty ("c" + juce::String (i), tirar ("cents" + juce::String (i), 0.0), nullptr);
+        }
+        n.setProperty ("notas", notas, nullptr);
+        n.setProperty ("libres", libres, nullptr);
+        return n;
+    }
+}
+
+TuneProcessor::AxustesNotas TuneProcessor::axustesNotas() const
+{
+    AxustesNotas a;
+    a.notas = mascaraNotas.load();
+    a.libres = mascaraLibres.load();
+    for (size_t i = 0; i < 12; ++i) a.cents[i] = centsNota[i].load();
+    return a;
+}
+
+void TuneProcessor::ponerAxustesNotas (const AxustesNotas& a)
+{
+    mascaraNotas = a.notas;
+    mascaraLibres = a.libres;
+    for (size_t i = 0; i < 12; ++i) centsNota[i] = a.cents[i];
+}
+
+void TuneProcessor::cambiarAxustesNotas (const AxustesNotas& a)
+{
+    const auto antes = axustesNotas();
+    if (antes.notas == a.notas && antes.libres == a.libres && antes.cents == a.cents) return;
+    estado.cambio ("notas", [this, a] { ponerAxustesNotas (a); }, [this, antes] { ponerAxustesNotas (antes); });
+}
+
+juce::ValueTree TuneProcessor::notasArbore (const AxustesNotas& a)
+{
+    juce::ValueTree n (idNotas);
+    n.setProperty ("notas", (int) a.notas, nullptr);
+    n.setProperty ("libres", (int) a.libres, nullptr);
+    for (int i = 0; i < 12; ++i) n.setProperty ("c" + juce::String (i), (double) a.cents[(size_t) i], nullptr);
+    return n;
+}
+
+// (lido sen fiarse; unha árbore non válida dá os valores de fábrica)
+TuneProcessor::AxustesNotas TuneProcessor::notasDeArbore (const juce::ValueTree& t)
+{
+    AxustesNotas a;
+    a.notas = (uint16_t) ((int) t.getProperty ("notas", 0x0fff) & 0x0fff);
+    a.libres = (uint16_t) ((int) t.getProperty ("libres", 0) & 0x0fff);
+    for (int i = 0; i < 12; ++i)
+    {
+        const double c = t.getProperty ("c" + juce::String (i), 0.0);
+        a.cents[(size_t) i] = std::isfinite (c) ? (float) juce::jlimit (-50.0, 50.0, c) : 0.0f;
+    }
+    return a;
+}
+
+float TuneProcessor::centsDaNota (int pc) const { return centsNota[(size_t) (((pc % 12) + 12) % 12)].load(); }
+
+void TuneProcessor::setCentsDaNota (int pc, float cents)
+{
+    auto a = axustesNotas();
+    a.cents[(size_t) (((pc % 12) + 12) % 12)] = juce::jlimit (-50.0f, 50.0f, cents);
+    cambiarAxustesNotas (a);
+}
+
+void TuneProcessor::setNotaLibre (int pc, bool libre)
+{
+    pc = ((pc % 12) + 12) % 12;
+    auto a = axustesNotas();
+    a.libres = (uint16_t) (libre ? (a.libres | (1u << pc)) : (a.libres & ~(1u << pc)));
+    cambiarAxustesNotas (a);
+}
+
 // ---- A/B e presets propios: o estado do núcleo, cos datos de Barullo Tune ----
 escoita::Estado::Opcions TuneProcessor::opcionsEstado()
 {
@@ -481,6 +565,15 @@ escoita::Estado::Opcions TuneProcessor::opcionsEstado()
     o.extension = "btpreset";
     o.excluir = { "bypass", "comparar", "edicion_capturar" };
     o.version = stateVersion;
+    o.extra = [this] { return notasArbore (axustesNotas()); };
+    o.aplicarExtra = [this] (const juce::ValueTree& t) { ponerAxustesNotas (notasDeArbore (t)); };
+    o.migrar = [] (juce::ValueTree& foto, int desde)
+    {
+        if (desde >= 3 || foto.getChildWithName ("EXTRA").isValid()) return;
+        juce::ValueTree e ("EXTRA");
+        e.appendChild (sacarNotasVellas (foto, "v"), nullptr);
+        foto.appendChild (e, nullptr);
+    };
     return o;
 }
 
@@ -564,12 +657,7 @@ TuneProcessor::Practice TuneProcessor::practice() const
 uint16_t TuneProcessor::effectiveMask() const
 {
     const int sc = juce::jlimit (0, scales::custom, (int) pEscala->load());
-    if (sc == scales::custom)
-    {
-        uint16_t m = 0;
-        for (int i = 0; i < 12; ++i) if (pNota[(size_t) i]->load() > 0.5f) m |= (uint16_t) (1u << i);
-        return m;
-    }
+    if (sc == scales::custom) return mascaraNotas.load();
     return scales::rotate (scales::all()[(size_t) sc].mask, (int) pTonica->load());
 }
 
@@ -623,30 +711,21 @@ void TuneProcessor::setCurrentProgram (int index)
     if (pr.quality >= 0) setParamPlain ("calidade", (float) pr.quality);
 }
 
-uint16_t TuneProcessor::freeMask() const
-{
-    uint16_t m = 0;
-    for (int i = 0; i < 12; ++i) if (pLibre[(size_t) i]->load() > 0.5f) m |= (uint16_t) (1u << i);
-    return m;
-}
+uint16_t TuneProcessor::freeMask() const { return mascaraLibres.load(); }
 
 void TuneProcessor::toggleFreeNote (int pc)
 {
     pc = ((pc % 12) + 12) % 12;
-    const bool on = (freeMask() >> pc) & 1;
-    setParamPlain ("libre" + juce::String (pc), on ? 0.0f : 1.0f);
+    setNotaLibre (pc, ! ((freeMask() >> pc) & 1));
 }
 
 void TuneProcessor::toggleScaleNote (int pc)
 {
-    const uint16_t m = effectiveMask();
-    if ((int) pEscala->load() != scales::custom)
-    {
-        for (int i = 0; i < 12; ++i) setParamPlain ("nota" + juce::String (i), ((m >> i) & 1) ? 1.0f : 0.0f);
-        setParamPlain ("escala", (float) scales::custom);
-    }
-    const bool on = (m >> pc) & 1;
-    setParamPlain ("nota" + juce::String (pc), on ? 0.0f : 1.0f);
+    // (a máscara parte da escala que soa agora, e cámbiase antes de pasar a Personalizada)
+    auto a = axustesNotas();
+    a.notas = (uint16_t) (effectiveMask() ^ (1u << pc));
+    cambiarAxustesNotas (a);
+    if ((int) pEscala->load() != scales::custom) setParamPlain ("escala", (float) scales::custom);
 }
 
 void TuneProcessor::pushFrame()
@@ -960,6 +1039,7 @@ void TuneProcessor::getStateInformation (juce::MemoryBlock& dest)
     params.state.setProperty ("ui", uiScale.load(), nullptr);
     params.state.setProperty ("tab", uiTab.load(), nullptr);
     auto st = params.copyState();
+    st.appendChild (notasArbore (axustesNotas()), nullptr);
     // o ton capturado e as notas editadas; no fío da mensaxe, antes pártese en notas o que se
     // capturase coa xanela pechada (desde outro fío, vai sen partir e pártese ao abrir a xanela)
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating(); mm == nullptr || mm->isThisTheMessageThread()) edicion.actualizar (notaPermitida());
@@ -983,6 +1063,11 @@ void TuneProcessor::migrateState (juce::ValueTree& st, int fromVersion)
         if (e.isValid() && (int) std::lround ((double) e.getProperty ("value", 0.0)) == scales::customV1)
             e.setProperty ("value", (double) scales::custom, nullptr);
     }
+    if (fromVersion < 3 && ! st.getChildWithName (idNotas).isValid())
+    {
+        // 2 → 3: os 36 parámetros por nota pasan a ser estado propio
+        st.appendChild (sacarNotasVellas (st, "value"), nullptr);
+    }
 }
 
 void TuneProcessor::setStateInformation (const void* data, int size)
@@ -1005,6 +1090,10 @@ void TuneProcessor::setStateInformation (const void* data, int size)
     if (ed.isValid()) st.removeChild (ed, nullptr);
     const int from = (int) st.getProperty ("version", 0);
     migrateState (st, from);
+    // os axustes por nota tampouco son dos parámetros
+    const auto notasGardadas = st.getChildWithName (idNotas);
+    ponerAxustesNotas (notasDeArbore (notasGardadas));
+    if (notasGardadas.isValid()) st.removeChild (notasGardadas, nullptr);
     // un estado vello non trae os parámetros novos: van co valor de fábrica, non co que tivese esta instancia
     for (auto* prm : getParameters())
         if (auto* wp = dynamic_cast<juce::RangedAudioParameter*> (prm))

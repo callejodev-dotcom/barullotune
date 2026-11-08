@@ -1206,7 +1206,7 @@ void Keyboard::mouseDown (const juce::MouseEvent& e)
     {
         // maiúsculas + arrastrar: os cents desta nota (en todas as oitavas)
         dragPc = n % 12;
-        dragStartCents = proc.params.getRawParameterValue ("cents" + juce::String (dragPc))->load();
+        dragStartCents = proc.centsDaNota (dragPc);
         return;
     }
     if (e.mods.isPopupMenu() || e.mods.isAltDown()) proc.toggleFreeNote (n);
@@ -1218,8 +1218,7 @@ void Keyboard::mouseDrag (const juce::MouseEvent& e)
 {
     if (dragPc < 0) return;
     const float c = juce::jlimit (-50.0f, 50.0f, dragStartCents - (float) e.getDistanceFromDragStartY() * 0.5f);
-    if (auto* prm = proc.params.getParameter ("cents" + juce::String (dragPc)))
-        prm->setValueNotifyingHost (prm->convertTo0to1 (std::round (c * 10.0f) / 10.0f));
+    proc.setCentsDaNota (dragPc, std::round (c * 10.0f) / 10.0f);
     repaint();
 }
 
@@ -1230,7 +1229,7 @@ juce::String Keyboard::describe (int note) const
     juce::String d = scales::noteWithOctave (note) + (free ? U (": libre") : inScale ? U (": na escala") : U (": fóra da escala"));
     if (customTuning())
     {
-        const float c = proc.params.getRawParameterValue ("cents" + juce::String (pc))->load();
+        const float c = proc.centsDaNota (pc);
         d << ", " << (c > 0 ? "+" : "") << juce::String (c, 1) << " cents";
     }
     return d;
@@ -1254,11 +1253,7 @@ bool Keyboard::keyPressed (const juce::KeyPress& k)
     if (shift && customTuning() && (code == juce::KeyPress::upKey || code == juce::KeyPress::downKey))
     {
         const int pc = focusNote % 12;
-        if (auto* prm = proc.params.getParameter ("cents" + juce::String (pc)))
-        {
-            const float c = juce::jlimit (-50.0f, 50.0f, prm->convertFrom0to1 (prm->getValue()) + (code == juce::KeyPress::upKey ? 1.0f : -1.0f));
-            prm->beginChangeGesture(); prm->setValueNotifyingHost (prm->convertTo0to1 (c)); prm->endChangeGesture();
-        }
+        proc.setCentsDaNota (pc, proc.centsDaNota (pc) + (code == juce::KeyPress::upKey ? 1.0f : -1.0f));
     }
     else if (code == juce::KeyPress::leftKey) focusNote = juce::jmax (lo, focusNote - 1);
     else if (code == juce::KeyPress::rightKey) focusNote = juce::jmin (hi, focusNote + 1);
@@ -1281,7 +1276,7 @@ juce::String Keyboard::getTooltip()
     juce::String tip = scales::noteName (pc) + st + U (" Clic para poñela ou quitala da escala (en todas as oitavas); clic dereito para deixala libre.");
     if (customTuning())
     {
-        const float c = proc.params.getRawParameterValue ("cents" + juce::String (pc))->load();
+        const float c = proc.centsDaNota (pc);
         tip << U (" Afinación: ") << (c > 0 ? "+" : "") << juce::String (c, 1).replaceCharacter ('.', ',') << U (" c (maiúsculas + arrastrar arriba ou abaixo para cambiala).");
     }
     return tip;

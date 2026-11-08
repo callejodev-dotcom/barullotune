@@ -154,7 +154,7 @@ public:
     void setStateInformation (const void*, int) override;
     // versión do formato do estado: súbese cada vez que cambian os parámetros, e
     // migrateState() leva os estados vellos ao formato novo
-    static constexpr int stateVersion = 2;
+    static constexpr int stateVersion = 3;
     static void migrateState (juce::ValueTree& state, int fromVersion);
 
     juce::UndoManager undo;   // desfacer e refacer os cambios de parámetros (declárase antes de params)
@@ -175,6 +175,10 @@ public:
     // notas libres: a voz pode ir a elas e non se corrixe
     uint16_t freeMask() const;
     void toggleFreeNote (int pc);
+    void setNotaLibre (int pc, bool libre);
+    // cents de cada nota na afinación Personalizada
+    float centsDaNota (int pc) const;
+    void setCentsDaNota (int pc, float cents);
     void setParamPlain (const juce::String& id, float plain);
 
     // afinación de cada clase de altura (cents, absoluta: 0 = Do), segundo «afinacion»
@@ -265,7 +269,19 @@ private:
     float levelAcc = 0, outAcc = 0;
     std::atomic<int> latencyNow { 0 }, realLatency { 0 };
     int currentPreset = 0;
-    static escoita::Estado::Opcions opcionsEstado();
+    escoita::Estado::Opcions opcionsEstado();
+
+    // os axustes por nota (escala, notas libres e cents) non son parámetros: con eles pasaríamos
+    // de 64 e Ableton Live abriría o plugin co panel baleiro. Van co estado, o A/B, os presets e
+    // o desfacer; o fío de audio só le os atómicos
+    struct AxustesNotas { uint16_t notas = 0x0fff, libres = 0; std::array<float, 12> cents {}; };
+    AxustesNotas axustesNotas() const;
+    void ponerAxustesNotas (const AxustesNotas&);
+    void cambiarAxustesNotas (const AxustesNotas&);   // cun paso de desfacer
+    static juce::ValueTree notasArbore (const AxustesNotas&);
+    static AxustesNotas notasDeArbore (const juce::ValueTree&);
+    std::atomic<uint16_t> mascaraNotas { 0x0fff }, mascaraLibres { 0 };
+    std::array<std::atomic<float>, 12> centsNota {};
 public:
     std::atomic<float> uiScale { 1.0f };   // tamaño da xanela (gárdase co proxecto)
     std::atomic<int> uiTab { 0 };          // a pestana aberta (tamén)
@@ -311,14 +327,12 @@ private:
     float airEnv = 0, airGate = 0, airHp1 = 0, airHp2 = 0, airHp1Prev = 0, airPrev = 0, airLp = 0, airEnvA = 0.003f, airHpA = 0.77f, airLpA = 0.7f;
     uint32_t airRng = 22222u;
     int midiOutNote = -1, midiOutSilence = 0, midiOutHold = 1920, midiOutPending = -1, midiOutPendingAge = 0, midiOutMinDur = 1440;
-    std::array<std::atomic<float>*, 12> pCents {};
     struct HarmParams { std::atomic<float>* on, *interval, *level, *pan, *detune, *delay, *formant; };
     std::array<HarmParams, numHarmonies> harmP {};
     struct HarmState { std::vector<float> line; int pos = 0; juce::SmoothedValue<float> gL, gR, del; };
     std::array<HarmState, numHarmonies> harmS;
     juce::SmoothedValue<float> leadSm, harmSm;
     juce::AudioProcessorParameter* bypassParam = nullptr;
-    std::array<std::atomic<float>*, 12> pNota {}, pLibre {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TuneProcessor)
 };

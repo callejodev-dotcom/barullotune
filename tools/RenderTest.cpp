@@ -625,7 +625,7 @@ int main (int argc, char** argv)
         {
             auto tl = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); setP (p, "velocidade", 0); setP (p, "tolerancia", 40); }, lat);
             auto st = evaluate (tl, lat, truth, 0);
-            auto lb = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); for (int i = 0; i < 12; ++i) setP (p, ("libre" + juce::String (i)).toRawUTF8(), 1); }, lat);
+            auto lb = run (voice, 512, 2, [&] (TuneProcessor& p) { setq (p); major (p); for (int i = 0; i < 12; ++i) p.setNotaLibre (i, true); }, lat);
             auto sl = evaluate (lb, lat, truth, 0);
             std::printf ("tolerancia 40 c: saída %.1f c | todas libres: saída %.1f c (entrada %.1f c)\n", st.outC, sl.outC, sl.inC);
             check ("tolerancia e notas libres: deixan a voz", st.outC > 0.6 * st.inC && sl.outC > 0.85 * sl.inC);
@@ -1575,6 +1575,55 @@ int main (int argc, char** argv)
         check ("MPE: o bend da canle da nota, co rango escollido", std::abs (own - 64.0) < 0.1 && std::abs (other - 60.0) < 0.1);
     }
 
+    // os axustes por nota: fóra dos parámetros (Ableton Live só enche o panel ata 64), pero co estado
+    {
+        TuneProcessor a;
+        check ("ata 64 parámetros para o DAW", a.getParameters().size() <= 64);
+        a.toggleScaleNote (1); a.toggleFreeNote (3); a.setCentsDaNota (4, 12.5f);
+        const uint16_t maskA = a.effectiveMask();
+        const auto iguais = [&] (const TuneProcessor& p)
+        { return p.effectiveMask() == maskA && p.freeMask() == (uint16_t) (1 << 3) && std::abs (p.centsDaNota (4) - 12.5f) < 1.0e-3f; };
+
+        juce::MemoryBlock mb; a.getStateInformation (mb);
+        TuneProcessor b; b.setStateInformation (mb.getData(), (int) mb.getSize());
+        check ("axustes por nota: gárdanse co proxecto", iguais (b));
+
+        // proxecto da versión 2: os 36 parámetros aínda van como PARAM
+        auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+        xml->removeChildElement (xml->getChildByName ("NOTAS"), true);
+        xml->setAttribute ("version", 2);
+        const auto engadir = [&] (const juce::String& id, double v)
+        { auto* e = xml->createNewChildElement ("PARAM"); e->setAttribute ("id", id); e->setAttribute ("value", v); };
+        for (int i = 0; i < 12; ++i)
+        {
+            engadir ("nota" + juce::String (i), (maskA >> i) & 1);
+            engadir ("libre" + juce::String (i), i == 3 ? 1.0 : 0.0);
+            engadir ("cents" + juce::String (i), i == 4 ? 12.5 : 0.0);
+        }
+        juce::MemoryBlock old; juce::AudioProcessor::copyXmlToBinary (*xml, old);
+        TuneProcessor c; c.toggleFreeNote (7);
+        c.setStateInformation (old.getData(), (int) old.getSize());
+        check ("axustes por nota: un proxecto da versión 2 consérvaos", iguais (c));
+
+        // A/B e presets (a foto), e un preset da versión 2
+        TuneProcessor d; d.estado.aplicar (a.estado.foto());
+        check ("axustes por nota: van nas fotos do A/B e dos presets", iguais (d));
+        juce::ValueTree vello ("PARAMS");
+        vello.setProperty ("version", 2, nullptr);
+        vello.appendChild (juce::ValueTree ("P", { { "id", "cents4" }, { "v", 7.0 } }), nullptr);
+        vello.appendChild (juce::ValueTree ("P", { { "id", "libre2" }, { "v", 1.0 } }), nullptr);
+        TuneProcessor e; e.estado.aplicar (vello);
+        check ("axustes por nota: un preset da versión 2 consérvaos", std::abs (e.centsDaNota (4) - 7.0f) < 1.0e-3f && e.freeMask() == (uint16_t) (1 << 2));
+
+        // desfacer
+        TuneProcessor u; u.undo.beginNewTransaction(); u.setCentsDaNota (4, 10.0f); u.undo.beginNewTransaction(); u.toggleScaleNote (1);
+        u.params.copyState();   // (os parámetros chegan á árbore con retardo: isto fórzao)
+        u.undo.undo();
+        const bool escala = (int) u.params.getRawParameterValue ("escala")->load() != scales::custom;
+        u.undo.undo();
+        check ("axustes por nota: pódense desfacer", escala && std::abs (u.centsDaNota (4)) < 1.0e-3f);
+    }
+
     // escalas e afinación
     {
         // estado da versión 1 con «Personalizada» (daquela o 9): segue sendo Personalizada
@@ -1606,7 +1655,7 @@ int main (int argc, char** argv)
         {
             int l = 0;
             auto y = run (e4, 512, 1, [&] (TuneProcessor& p) { setP (p, "calidade", 2); major (p); setP (p, "velocidade", 0); setP (p, "transicion", 0); setP (p, "vibrato", 0);
-                                                               setP (p, "afinacion", (float) afin); setP (p, "cents4", cents4); }, l);
+                                                               setP (p, "afinacion", (float) afin); p.setCentsDaNota (4, cents4); }, l);
             double acc = 0; int cnt = 0;
             for (int64_t c = (int64_t) (0.3 * SR); c < (int64_t) (1.1 * SR); c += 240) { const double mo = measure (y.getReadPointer (0), y.getNumSamples(), c + l); if (mo > 0) { acc += mo; ++cnt; } }
             return (acc / std::max (1, cnt) - 64.0) * 100.0;
